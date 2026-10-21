@@ -423,7 +423,7 @@ static void tp_handle(void)
         if (in_btn(x, y, &btn_dec[i])) {
             switch (i) {
                 case 0: mtr[cur_motor].target_rpm -= 10; if (mtr[cur_motor].target_rpm<0) mtr[cur_motor].target_rpm=0; break;
-                case 1: mtr[cur_motor].kp -= 0.1f; if (mtr[cur_motor].kp<0) mtr[cur_motor].kp=0; break;
+                case 1: mtr[cur_motor].kp -= 0.01f; if (mtr[cur_motor].kp<0) mtr[cur_motor].kp=0; break;
                 case 2: mtr[cur_motor].ki -= 0.05f; if (mtr[cur_motor].ki<0) mtr[cur_motor].ki=0; break;
                 case 3: mtr[cur_motor].kd -= 0.05f; if (mtr[cur_motor].kd<0) mtr[cur_motor].kd=0; break;
             }
@@ -434,7 +434,7 @@ static void tp_handle(void)
         if (in_btn(x, y, &btn_inc[i])) {
             switch (i) {
                 case 0: mtr[cur_motor].target_rpm += 10; if (mtr[cur_motor].target_rpm>250) mtr[cur_motor].target_rpm=250; break;
-                case 1: mtr[cur_motor].kp += 0.1f; break;
+                case 1: mtr[cur_motor].kp += 0.01f; break;
                 case 2: mtr[cur_motor].ki += 0.05f; break;
                 case 3: mtr[cur_motor].kd += 0.05f; break;
             }

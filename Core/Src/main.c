@@ -65,8 +65,9 @@ static void PID_Task(void *pv)
             actual = -actual;
             pid[i].rpm = actual;
 
-            /* 低通滤波: 平滑转速读数, 减少抖动 */
-            pid[i].rpm_filtered = pid[i].rpm_filtered * 0.7f + actual * 0.3f;
+            /* 低通滤波: 平滑转速读数, 减少抖动
+             * 注意: 滤波太强会引入相位滞后, 导致 Kp 稍大就振荡 */
+            pid[i].rpm_filtered = pid[i].rpm_filtered * 0.5f + actual * 0.5f;
             actual = pid[i].rpm_filtered;
 
             /* 读屏幕参数 (每个电机有自己独立的参数) */
@@ -84,6 +85,12 @@ static void PID_Task(void *pv)
             pid[i].last_err = err;
 
             float pwm = kp * err + ki * pid[i].integral + kd * deriv;
+
+            /* 调试: 如果 Kp/Ki/Kd 都接近 0, 强制 PWM=0 */
+            if (kp < 0.01f && ki < 0.01f && kd < 0.01f) {
+                pwm = 0;
+            }
+
             if (pwm > 100)  pwm = 100;
             if (pwm < -100) pwm = -100;
 
