@@ -56,12 +56,12 @@ typedef struct {
 } PID_Motor_t;
 
 static PID_Motor_t mtr[PID_MOTOR_NUM] = {
-    { 2.0f, 0.50f, 0.20f, 100.0f, 0, 0, 0, 0, 0 },
-    { 2.0f, 0.50f, 0.20f, 100.0f, 0, 0, 0, 0, 0 }
+    { 0.5f, 0.10f, 0.05f, 50.0f, 0, 0, 0, 0, 0 },
+    { 0.5f, 0.10f, 0.05f, 50.0f, 0, 0, 0, 0, 0 }
 };
 
 static uint8_t cur_motor = PID_MOTOR_1;
-static uint8_t is_running = 0;
+static uint8_t is_running[2] = {0, 0};  /* 每个电机独立的运行状态 */
 
 /* 波形缓冲: 100 点 × 100ms = 10 秒 */
 #define WAVE_POINTS     100
@@ -331,11 +331,12 @@ static void draw_motor_tabs(void)
 
 static void draw_run_status(void)
 {
-    lcd_fill_circle(260, 12, 4, is_running ? COL_GREEN : COL_GRAY);
+    uint8_t running = is_running[cur_motor];
+    lcd_fill_circle(260, 12, 4, running ? COL_GREEN : COL_GRAY);
     lcd_fill(268, 5, 310, 19, COL_PANEL);
     lcd_show_string(268, 5, 40, 14, 12,
-                    is_running ? "RUN" : "STOP",
-                    is_running ? COL_GREEN : COL_GRAY);
+                    running ? "RUN" : "STOP",
+                    running ? COL_GREEN : COL_GRAY);
 }
 
 static void draw_readout(void)
@@ -378,7 +379,7 @@ static void draw_waveform(void)
 {
     uint16_t i;
     /* 清波形区 */
-    lcd_fill(WAVE_X, WAVE_Y+12, WAVE_X+WAVE_W-1, WAVE_Y+WAVE_H-1, COL_BG);
+    lcd_fill(WAVE_X, WAVE_Y, WAVE_X+WAVE_W-1, WAVE_Y+WAVE_H-1, COL_BG);
 
     /* 网格 */
     for (i=0;i<3;i++) {
@@ -447,36 +448,39 @@ static void tp_handle(void)
     if (in_btn(x, y, &btn_m1)) {
         cur_motor = PID_MOTOR_1;
         draw_motor_tabs(); draw_param_values();
-        /* 清空波形 */
+        /* 清空波形并重置索引 */
+        wave_idx = 0;
         for (i=0;i<WAVE_POINTS;i++) {
             wave_target[i] = mtr[cur_motor].target_rpm;
             wave_actual[i] = mtr[cur_motor].actual_rpm;
         }
+        draw_waveform();
         vTaskDelay(pdMS_TO_TICKS(150));
         return;
     }
     if (in_btn(x, y, &btn_m2)) {
         cur_motor = PID_MOTOR_2;
         draw_motor_tabs(); draw_param_values();
+        wave_idx = 0;
         for (i=0;i<WAVE_POINTS;i++) {
             wave_target[i] = mtr[cur_motor].target_rpm;
             wave_actual[i] = mtr[cur_motor].actual_rpm;
         }
+        draw_waveform();
         vTaskDelay(pdMS_TO_TICKS(150));
         return;
     }
 
-    /* 底栏按钮 */
+    /* 底栏按钮 - 只控制当前选中的电机 */
     if (in_btn(x, y, &btn_start)) {
-        is_running = 1;
-        /* 积分清理由主程序 PID 模块自己负责 */
+        is_running[cur_motor] = 1;
         draw_run_status();
         vTaskDelay(pdMS_TO_TICKS(150));
         return;
     }
     if (in_btn(x, y, &btn_stop)) {
-        is_running = 0;
-        for (i=0;i<PID_MOTOR_NUM;i++) { mtr[i].pwm_out = 0; }
+        is_running[cur_motor] = 0;
+        mtr[cur_motor].pwm_out = 0;
         draw_run_status();
         vTaskDelay(pdMS_TO_TICKS(150));
         return;
@@ -545,7 +549,9 @@ float PID_Screen_GetKp(uint8_t motor)    { return mtr[motor].kp; }
 float PID_Screen_GetKi(uint8_t motor)    { return mtr[motor].ki; }
 float PID_Screen_GetKd(uint8_t motor)    { return mtr[motor].kd; }
 float PID_Screen_GetTargetRPM(uint8_t motor) { return mtr[motor].target_rpm; }
-uint8_t PID_Screen_IsRunning(void)       { return is_running; }
+uint8_t PID_Screen_IsRunning(void)       { return is_running[cur_motor]; }
+uint8_t PID_Screen_IsMotorRunning(uint8_t motor) { return is_running[motor]; }
+uint8_t PID_Screen_GetCurrentMotor(void) { return cur_motor; }
 
 /* ---- FreeRTOS 任务 ---- */
 void PID_Screen_Task(void * argument)

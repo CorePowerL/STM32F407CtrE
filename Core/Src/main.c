@@ -24,15 +24,17 @@ typedef struct {
     float integral;
     float last_err;
     float rpm;
+    float rpm_filtered;   /* 滤波后的转速 */
 } PID_Data_t;
 
 static PID_Data_t pid[2] = {
-    { 0, 0, 0 },
-    { 0, 0, 0 }
+    { 0, 0, 0, 0 },
+    { 0, 0, 0, 0 }
 };
 
-/* 编码器线数 (减速后每圈脉冲数) */
-#define PULSE_PER_REV   330.0f
+/* 编码器线数 (减速后每圈脉冲数)
+ * 11线编码器 × 4倍频(编码器模式3) × 30减速比 = 1320 */
+#define PULSE_PER_REV   1320.0f
 /* 采样周期 ms */
 #define SAMPLE_DT_MS    100
 
@@ -46,24 +48,28 @@ static void PID_Task(void *pv)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(SAMPLE_DT_MS));
 
-        if (!PID_Screen_IsRunning()) {
-            for (i = 0; i < 2; i++) {
+        /* 两个电机独立判断运行状态 */
+        for (i = 0; i < 2; i++) {
+            if (!PID_Screen_IsMotorRunning(i)) {
                 Motor_SetSpeed(i, 0);
                 pid[i].integral = 0;
                 pid[i].last_err = 0;
                 pid[i].rpm = 0;
                 PID_Screen_SetActualRPM(i, 0);
                 PID_Screen_SetPWMOUT(i, 0);
+                continue;
             }
-            continue;
-        }
 
-        for (i = 0; i < 2; i++) {
             /* 读编码器 */
             float actual = Encoder_GetRPM(i, PULSE_PER_REV, SAMPLE_DT_MS);
+            actual = -actual;
             pid[i].rpm = actual;
 
-            /* 读屏幕参数 */
+            /* 低通滤波: 平滑转速读数, 减少抖动 */
+            pid[i].rpm_filtered = pid[i].rpm_filtered * 0.7f + actual * 0.3f;
+            actual = pid[i].rpm_filtered;
+
+            /* 读屏幕参数 (每个电机有自己独立的参数) */
             float target = PID_Screen_GetTargetRPM(i);
             float kp = PID_Screen_GetKp(i);
             float ki = PID_Screen_GetKi(i);

@@ -12,13 +12,19 @@ static void Encoder_GPIO_Init(void)
 {
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN;
 
-    /* PA0/PA1 - TIM2_CH1/CH2, 浮空输入 */
-    GPIOA->MODER &= ~((3<<0) | (3<<2));  /* 输入模式 */
-    GPIOA->PUPDR &= ~((3<<0) | (3<<2));  /* 无上下拉 */
+    /* PA0/PA1 - TIM2_CH1/CH2, AF1 复用功能 */
+    GPIOA->MODER &= ~((3<<0) | (3<<2));   /* 先清位 */
+    GPIOA->MODER |=  ((2<<0) | (2<<2));   /* AF 模式 */
+    GPIOA->PUPDR &= ~((3<<0) | (3<<2));   /* 无上下拉 */
+    GPIOA->AFR[0] &= ~((0xF<<0) | (0xF<<4));  /* 先清 AF */
+    GPIOA->AFR[0] |=  ((1<<0) | (1<<4));      /* AF1 = TIM2 */
 
-    /* PB6/PB7 - TIM4_CH1/CH2, 浮空输入 */
-    GPIOB->MODER &= ~((3<<12) | (3<<14));  /* 输入模式 */
+    /* PB6/PB7 - TIM4_CH1/CH2, AF2 复用功能 */
+    GPIOB->MODER &= ~((3<<12) | (3<<14));  /* 先清位 */
+    GPIOB->MODER |=  ((2<<12) | (2<<14));  /* AF 模式 */
     GPIOB->PUPDR &= ~((3<<12) | (3<<14));  /* 无上下拉 */
+    GPIOB->AFR[0] &= ~((0xF<<24) | (0xF<<28));  /* 先清 AF */
+    GPIOB->AFR[0] |=  ((2<<24) | (2<<28));      /* AF2 = TIM4 */
 }
 
 /* ====================== TIM2 编码器模式 ====================== */

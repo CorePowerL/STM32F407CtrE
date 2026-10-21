@@ -47,7 +47,13 @@ float PID_Screen_GetKi(uint8_t motor);
 float PID_Screen_GetKd(uint8_t motor);
 float PID_Screen_GetTargetRPM(uint8_t motor);
 
-/* 屏幕是否处于 RUN 状态 */
+/* 屏幕是否处于 RUN 状态 (当前选中的电机) */
 uint8_t PID_Screen_IsRunning(void);
+
+/* 获取指定电机的运行状态 */
+uint8_t PID_Screen_IsMotorRunning(uint8_t motor);
+
+/* 获取当前选中的电机 (0=M1, 1=M2) */
+uint8_t PID_Screen_GetCurrentMotor(void);
 
 #endif /* __PID_SCREEN_H */
