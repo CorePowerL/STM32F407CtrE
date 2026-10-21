@@ -1,0 +1,30 @@
+# Keil 编译输出
+Objects/
+Listings/
+Debug/
+DebugConfig/
+*.axf
+*.hex
+*.bin
+*.htm
+*.lnp
+*.sct
+*.dep
+*.bak
+*.o
+*.d
+*.crf
+*.iex
+*.map
+
+# 临时文件
+*.tmp
+*.log
+*.uvguix.*
+*.uvoptx.*
+JLinkLog.txt
+JLinkSettings.ini
+
+# 系统文件
+Thumbs.db
+.DS_Store
