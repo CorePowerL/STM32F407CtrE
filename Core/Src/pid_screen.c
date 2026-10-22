@@ -46,7 +46,8 @@
 #define COL_ACCENT      lv_color_hex(0x4A9EFF)   /* 唯一强调蓝 */
 #define COL_ACCENT_DK   lv_color_hex(0x1A5FB4)   /* 主按钮实底 */
 #define COL_DANGER      lv_color_hex(0xC97074)   /* 克制红 */
-#define COL_TARGET      lv_color_hex(0x6B7684)   /* 目标波形灰蓝 */
+#define COL_TARGET      lv_color_hex(0xFFFF00)   /* 目标波形黄 (对齐 ac5b9b1) */
+#define COL_ACTUAL      lv_color_hex(0x00FF00)   /* 实际波形绿 (对齐 ac5b9b1) */
 
 /* ====================== PID 参数存储 ====================== */
 typedef struct {
@@ -224,10 +225,10 @@ static void draw_param_values(void)
 {
     char s[16];
     PID_Motor_t *m = &mtr[cur_motor];
-    lv_snprintf(s, sizeof(s), "%.0f", m->target_rpm);  lv_label_set_text(val[0], s);
-    lv_snprintf(s, sizeof(s), "%.1f", m->kp);          lv_label_set_text(val[1], s);
-    lv_snprintf(s, sizeof(s), "%.2f", m->ki);          lv_label_set_text(val[2], s);
-    lv_snprintf(s, sizeof(s), "%.2f", m->kd);          lv_label_set_text(val[3], s);
+    snprintf(s, sizeof(s), "%.0f", m->target_rpm);  lv_label_set_text(val[0], s);
+    snprintf(s, sizeof(s), "%.2f", m->kp);          lv_label_set_text(val[1], s);
+    snprintf(s, sizeof(s), "%.2f", m->ki);          lv_label_set_text(val[2], s);
+    snprintf(s, sizeof(s), "%.2f", m->kd);          lv_label_set_text(val[3], s);
 }
 
 /* Tab 选中态: 文字亮度 + 底部 2px 蓝线 */
@@ -268,15 +269,15 @@ static void draw_readout(void)
     char s[16];
     PID_Motor_t *m = &mtr[cur_motor];
 
-    lv_snprintf(s, sizeof(s), "%.1f", m->actual_rpm);  lv_label_set_text(ro[0], s);
-    lv_snprintf(s, sizeof(s), "%d", (int)m->pwm_out);  lv_label_set_text(ro[1], s);
+    snprintf(s, sizeof(s), "%.1f", m->actual_rpm);  lv_label_set_text(ro[0], s);
+    snprintf(s, sizeof(s), "%d", (int)m->pwm_out);  lv_label_set_text(ro[1], s);
     if (m->target_rpm > 1) {
-        lv_snprintf(s, sizeof(s), "%.1f%%", m->overshoot);
+        snprintf(s, sizeof(s), "%.1f%%", m->overshoot);
     } else {
-        lv_snprintf(s, sizeof(s), "--");
+        snprintf(s, sizeof(s), "--");
     }
     lv_label_set_text(ro[2], s);
-    lv_snprintf(s, sizeof(s), "%.1f", m->target_rpm - m->actual_rpm);  lv_label_set_text(ro[3], s);
+    snprintf(s, sizeof(s), "%.1f", m->target_rpm - m->actual_rpm);  lv_label_set_text(ro[3], s);
 }
 
 /* 电机切换: 重置该电机波形缓冲 */
@@ -300,7 +301,7 @@ static void ev_dec(lv_event_t *e)
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     switch (idx) {
         case 0: mtr[cur_motor].target_rpm -= 10; if (mtr[cur_motor].target_rpm < 0) mtr[cur_motor].target_rpm = 0; break;
-        case 1: mtr[cur_motor].kp -= 0.1f; if (mtr[cur_motor].kp < 0) mtr[cur_motor].kp = 0; break;
+        case 1: mtr[cur_motor].kp -= 0.01f; if (mtr[cur_motor].kp < 0) mtr[cur_motor].kp = 0; break;
         case 2: mtr[cur_motor].ki -= 0.05f; if (mtr[cur_motor].ki < 0) mtr[cur_motor].ki = 0; break;
         case 3: mtr[cur_motor].kd -= 0.05f; if (mtr[cur_motor].kd < 0) mtr[cur_motor].kd = 0; break;
     }
@@ -312,7 +313,7 @@ static void ev_inc(lv_event_t *e)
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     switch (idx) {
         case 0: mtr[cur_motor].target_rpm += 10; if (mtr[cur_motor].target_rpm > 250) mtr[cur_motor].target_rpm = 250; break;
-        case 1: mtr[cur_motor].kp += 0.1f; break;
+        case 1: mtr[cur_motor].kp += 0.01f; break;
         case 2: mtr[cur_motor].ki += 0.05f; break;
         case 3: mtr[cur_motor].kd += 0.05f; break;
     }
@@ -446,11 +447,11 @@ static void build_ui(void)
     lv_obj_set_style_line_width(chart, 1, 0);
     lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 0, 0, 0, 0, false, 0);
     lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 0, 0, 0, 0, false, 0);
-    /* 系列线条: 目标细灰蓝, 实际蓝 */
+    /* 系列线条: 目标黄, 实际绿 (对齐 ac5b9b1) */
     ser_target = lv_chart_add_series(chart, COL_TARGET, LV_CHART_AXIS_PRIMARY_Y);
-    ser_actual = lv_chart_add_series(chart, COL_ACCENT, LV_CHART_AXIS_PRIMARY_Y);
+    ser_actual = lv_chart_add_series(chart, COL_ACTUAL, LV_CHART_AXIS_PRIMARY_Y);
     lv_obj_set_style_line_width(chart, 1, LV_PART_ITEMS);
-    lv_obj_set_style_size(chart, 0, LV_PART_ITEMS);
+    lv_obj_set_style_size(chart, 0, LV_PART_INDICATOR);
 
     /* 图例: 小色块 + 文字 */
     lv_obj_t *sw1 = lv_obj_create(lv_scr_act());
@@ -465,7 +466,7 @@ static void build_ui(void)
     lv_obj_t *sw2 = lv_obj_create(lv_scr_act());
     lv_obj_set_pos(sw2, 160, 32);
     lv_obj_set_size(sw2, 7, 7);
-    lv_obj_set_style_bg_color(sw2, COL_ACCENT, 0);
+    lv_obj_set_style_bg_color(sw2, COL_ACTUAL, 0);
     lv_obj_set_style_border_width(sw2, 0, 0);
     lv_obj_set_style_radius(sw2, 2, 0);
     lv_obj_set_style_pad_all(sw2, 0, 0);
