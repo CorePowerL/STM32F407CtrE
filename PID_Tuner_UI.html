@@ -530,8 +530,10 @@ setInterval(() => { drawReadout(cur); }, 200);
 /* ===================== LCD 自适应缩放 ===================== */
 const stage = $('stage'), lcd = $('lcd');
 function fit() {
-  const avail = stage.parentElement.clientWidth;
-  const s = Math.min(avail / 320, 2.2, 1.9);
+  const bezel = stage.parentElement;
+  const cs = getComputedStyle(bezel);
+  const avail = bezel.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const s = Math.min(avail / 320, 1.9);
   stage.style.width = (320 * s) + 'px';
   stage.style.height = (240 * s) + 'px';
   lcd.style.transform = 'scale(' + s + ')';

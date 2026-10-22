@@ -10,7 +10,7 @@
   "shots": {
     "desktop": {
       "screenshot": "D:\\stm32_project\\PID\\STM32F407CtrE\\_shots\\PID_Tuner_UI_desktop.jpg",
-      "screenshotBytes": 71746,
+      "screenshotBytes": 70998,
       "truncated": false,
       "structure": {
         "title": "STM32F407 PID 调参屏 · 与 pid_screen.c 一致",
@@ -45,7 +45,7 @@
   "chromiumExec": "C:\\Users\\zqt31/AppData/Local/ms-playwright\\chromium-1140\\chrome-win\\chrome.exe",
   "engineDegraded": true,
   "engineDegradedReason": "playwright 未装",
-  "elapsedSec": 4.65,
+  "elapsedSec": 4.7,
   "schemaVersion": 2,
   "status": "pass",
   "engineInfo": {
@@ -70,7 +70,7 @@
       {
         "viewport": "desktop",
         "path": "D:\\stm32_project\\PID\\STM32F407CtrE\\_shots\\PID_Tuner_UI_desktop.jpg",
-        "size": 71746,
+        "size": 70998,
         "visualCoverage": {
           "complete": true,
           "reason": null
