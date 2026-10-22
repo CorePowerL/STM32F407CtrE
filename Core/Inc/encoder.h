@@ -23,6 +23,9 @@ void Encoder_Init(void);
 /* 读取编码器计数 (累积脉冲数) */
 int16_t Encoder_Read(uint8_t encoder);
 
+/* 读取并清零, 返回一个采样周期内的原始计数 (开环诊断用) */
+int16_t Encoder_GetCount(uint8_t encoder);
+
 /* 清零编码器计数 */
 void Encoder_Reset(uint8_t encoder);
 

@@ -19,10 +19,12 @@ static void Encoder_GPIO_Init(void)
     GPIOA->AFR[0] &= ~((0xF<<0) | (0xF<<4));  /* 先清 AF */
     GPIOA->AFR[0] |=  ((1<<0) | (1<<4));      /* AF1 = TIM2 */
 
-    /* PB6/PB7 - TIM4_CH1/CH2, AF2 复用功能 */
+    /* PB6/PB7 - TIM4_CH1/CH2, AF2 复用功能
+     * 加内部上拉, 防止编码器输出悬空导致读数乱跳 (M2 震荡修复) */
     GPIOB->MODER &= ~((3<<12) | (3<<14));  /* 先清位 */
     GPIOB->MODER |=  ((2<<12) | (2<<14));  /* AF 模式 */
-    GPIOB->PUPDR &= ~((3<<12) | (3<<14));  /* 无上下拉 */
+    GPIOB->PUPDR &= ~((3<<12) | (3<<14));
+    GPIOB->PUPDR |=  ((1<<12) | (1<<14));  /* 内部上拉 */
     GPIOB->AFR[0] &= ~((0xF<<24) | (0xF<<28));  /* 先清 AF */
     GPIOB->AFR[0] |=  ((2<<24) | (2<<28));      /* AF2 = TIM4 */
 }
@@ -58,8 +60,10 @@ static void Encoder_TIM4_Init(void)
     /* 编码器模式 3 */
     TIM4->SMCR = 0x0003;
 
-    /* CH1 和 CH2 输入 */
-    TIM4->CCMR1 = 0x0101;
+    /* CH1/CH2 输入, 加硬件数字滤波:
+     * IC1F=0011, IC2F=0011 (3 个时钟周期滤波) 消除毛刺
+     * CC1S=01, CC2S=10 → CCMR1 = 0x3231 */
+    TIM4->CCMR1 = 0x3231;
 
     TIM4->CCER = 0;
 
@@ -81,6 +85,20 @@ int16_t Encoder_Read(uint8_t encoder)
     } else {
         return (int16_t)TIM4->CNT;
     }
+}
+
+/* 读取并清零, 返回一个采样周期内的原始计数 (用于开环诊断) */
+int16_t Encoder_GetCount(uint8_t encoder)
+{
+    int16_t c;
+    if (encoder == ENCODER_1) {
+        c = (int16_t)TIM2->CNT;
+        TIM2->CNT = 0;
+    } else {
+        c = (int16_t)TIM4->CNT;
+        TIM4->CNT = 0;
+    }
+    return c;
 }
 
 void Encoder_Reset(uint8_t encoder)

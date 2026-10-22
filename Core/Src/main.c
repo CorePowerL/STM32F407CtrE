@@ -38,6 +38,12 @@ static PID_Data_t pid[2] = {
 /* 采样周期 ms */
 #define SAMPLE_DT_MS    100
 
+/* 临时开环诊断开关: M2 固定 50% 正转, 看编码器原始计数
+ * 屏幕上 PWM% 位显示的是"100ms 内原始脉冲数" (不取反)
+ * 正常应稳定在 ~275 且为正; 若乱跳/为负则是硬件问题
+ * 诊断完改回 0 */
+#define M2_OPENLOOP_TEST   1
+
 /* ====================== PID 任务 ====================== */
 static void PID_Task(void *pv)
 {
@@ -60,13 +66,24 @@ static void PID_Task(void *pv)
                 continue;
             }
 
+#if M2_OPENLOOP_TEST
+            /* ===== 开环诊断: M2 固定 50% 正转, 不做闭环 ===== */
+            if (i == 1) {
+                Motor_SetSpeed(1, 35);                /* 固定正转 35% (启动临界) */
+                int16_t raw = Encoder_GetCount(1);    /* 100ms 内原始计数, 不取反 */
+                float raw_rpm = (float)raw * 60000.0f / (PULSE_PER_REV * SAMPLE_DT_MS);
+                PID_Screen_SetActualRPM(1, raw_rpm);  /* RPM 位: 实际转速 */
+                PID_Screen_SetPWMOUT(1, (float)raw);  /* PWM% 位: 显示原始计数 */
+                continue;
+            }
+#endif
+
             /* 读编码器 */
             float actual = Encoder_GetRPM(i, PULSE_PER_REV, SAMPLE_DT_MS);
             actual = -actual;
             pid[i].rpm = actual;
 
-            /* 低通滤波: 平滑转速读数, 减少抖动
-             * 注意: 滤波太强会引入相位滞后, 导致 Kp 稍大就振荡 */
+            /* 低通滤波: 0.5/0.5 减少相位滞后 (原 0.7/0.3 滞后大, 导致过冲) */
             pid[i].rpm_filtered = pid[i].rpm_filtered * 0.5f + actual * 0.5f;
             actual = pid[i].rpm_filtered;
 
@@ -78,17 +95,32 @@ static void PID_Task(void *pv)
 
             /* PID 计算 */
             float err = target - actual;
-            pid[i].integral += err * dt;
-            if (pid[i].integral > 50)  pid[i].integral = 50;
-            if (pid[i].integral < -50) pid[i].integral = -50;
             float deriv = (err - pid[i].last_err) / dt;
             pid[i].last_err = err;
 
-            float pwm = kp * err + ki * pid[i].integral + kd * deriv;
+            /* 抗积分饱和 (anti-windup):
+             * 先算新积分下的输出, 若输出已饱和且误差还在往饱和方向推,
+             * 则冻结积分 (防止启动前积分囤太多, 过冲后迟迟卸不掉) */
+            float new_integral = pid[i].integral + err * dt;
+            if (new_integral > 200) new_integral = 200;
+            if (new_integral < -200) new_integral = -200;
+            float pwm_new = kp * err + ki * new_integral + kd * deriv;
+            if ((pwm_new > 100 && err > 0) || (pwm_new < -100 && err < 0)) {
+                /* 冻结积分, 用旧值 */
+                pwm_new = kp * err + ki * pid[i].integral + kd * deriv;
+            } else {
+                pid[i].integral = new_integral;
+            }
+            float pwm = pwm_new;
 
-            /* 调试: 如果 Kp/Ki/Kd 都接近 0, 强制 PWM=0 */
-            if (kp < 0.01f && ki < 0.01f && kd < 0.01f) {
-                pwm = 0;
+            /* M2 启动死区: 只在电机静止时(实际转速<5rpm)应用
+             * M2 启动需要约 35% PWM, 小占空比静止时转不起来
+             * 电机一旦转起来(actual>=5), 维持转速只需小 PWM,
+             * 此时不能再清零, 否则会启停循环震荡
+             * M1 启动转矩小, 不需要死区 */
+            if (i == 1 && actual < 5.0f) {
+                if (pwm > 0 && pwm < 35) pwm = 0;
+                if (pwm < 0 && pwm > -35) pwm = 0;
             }
 
             if (pwm > 100)  pwm = 100;

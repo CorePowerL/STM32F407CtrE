@@ -61,9 +61,12 @@ static void Motor_PWM_Init(void)
     TIM3->CCR3 = 0;
     TIM3->CR1 |= TIM_CR1_CEN;
 
-    /* TIM8: M2 ENA */
+    /* TIM8: M2 ENA
+     * TIM8 在 APB2, 时钟 168MHz (TIM3 在 APB1 只有 84MHz)
+     * 用 PSC=168 让 PWM 频率 = 168MHz/168/10000 = 100Hz, 与 M1 一致
+     * (200Hz 下 L298N 小占空比转矩不足, 会导致 M2 震荡) */
     RCC->APB2ENR |= RCC_APB2ENR_TIM8EN;
-    TIM8->PSC = TIM_PSC - 1;
+    TIM8->PSC = 168 - 1;
     TIM8->ARR = TIM_ARR - 1;
     TIM8->CR1 = TIM_CR1_ARPE;
     TIM8->CCMR1 = (6<<4) | (1<<3);  /* CH1 PWM mode1 */

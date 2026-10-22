@@ -308,7 +308,7 @@ static void draw_param_values(void)
 
     sprintf(s, "%.0f", m->target_rpm);
     lcd_show_string(34, 48,  55, 16, 16, s, COL_YELLOW);
-    sprintf(s, "%.1f", m->kp);
+    sprintf(s, "%.2f", m->kp);
     lcd_show_string(34, 86,  55, 16, 16, s, COL_GREEN);
     sprintf(s, "%.2f", m->ki);
     lcd_show_string(34, 124, 55, 16, 16, s, COL_CYAN);
