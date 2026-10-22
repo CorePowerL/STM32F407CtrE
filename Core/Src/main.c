@@ -115,7 +115,7 @@ int main(void)
     Encoder_Init();
     PID_Screen_Init();
 
-    xTaskCreate(PID_Screen_Task, "UI", 512, NULL, 3, NULL);
+    xTaskCreate(PID_Screen_Task, "UI", 1024, NULL, 3, NULL);
     xTaskCreate(PID_Task,        "PID", 256, NULL, 2, NULL);
 
     vTaskStartScheduler();

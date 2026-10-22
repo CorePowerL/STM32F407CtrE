@@ -1,8 +1,16 @@
 /**
  ******************************************************************************
  * @file    pid_screen.c
- * @brief   PID 调试屏幕模块实现
- *          320x240, 黑底绿/黄/青/红, 沿用 GenBotter Motor-1 LCD 风格
+ * @brief   PID 调试屏幕模块 - LVGL 实现
+ *          320x240, 黑底绿/黄/青/红, 布局与 PID_Tuner_UI.html 完全一致
+ *
+ *          功能:
+ *           - M1/M2 双电机独立 PID 参数
+ *           - 触摸屏 +/- 按钮调 Kp/Ki/Kd/Target
+ *           - 目标/实际转速实时波形 (10秒窗口, 100点)
+ *           - 超调量/稳态误差显示
+ *
+ *          对外数据接口与旧版保持一致, 主程序 PID_Task 无需改动
  ******************************************************************************
  */
 
@@ -10,37 +18,35 @@
 #include "lcd.h"
 #include "delay.h"
 #include "pid_screen.h"
+#include "lvgl.h"
+#include "lv_port.h"
+#include "wave_grid.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "FreeRTOS.h"
 #include "task.h"
 
-/* ====================== 屏幕参数 ====================== */
+/* ====================== 屏幕参数 (与 html 一致) ====================== */
 #define SCR_W           320
 #define SCR_H           240
 
-/* 布局 */
-#define TOP_BAR_H       24
-#define BOTTOM_BAR_H    54          /* 底栏按钮高 */
-#define LEFT_PANEL_W    120
-#define WAVE_X          122
-#define WAVE_Y          27
-#define WAVE_W          195
-#define WAVE_H          113
-#define RO_Y            145         /* 读数行 y */
-#define RO_H            38
+/* 颜色 (RGB565, 与 pid_screen 旧版 / HTML 一致) */
+#define COL_BLACK       lv_color_hex(0x0000)
+#define COL_PANEL       lv_color_hex(0x2104)
+#define COL_BORDER      lv_color_hex(0x12A6)
+#define COL_GREEN       lv_color_hex(0x07E0)
+#define COL_YELLOW      lv_color_hex(0xFFE0)
+#define COL_RED         lv_color_hex(0xF800)
+#define COL_CYAN        lv_color_hex(0x07FF)
+#define COL_GRAY        lv_color_hex(0x8430)
+#define COL_MAGENTA     lv_color_hex(0xF81F)
 
-/* 颜色 (RGB565, 用 lcd.h 已定义的) */
-#define COL_BG          BLACK
-#define COL_PANEL       0x2104
-#define COL_BORDER      0x12A6
-#define COL_GREEN       GREEN
-#define COL_YELLOW      YELLOW
-#define COL_RED         RED
-#define COL_CYAN        CYAN
-#define COL_GRAY        GRAY
-#define COL_MAGENTA     MAGENTA
+/* 按钮底色 (按 HTML) */
+#define FILL_M1_ACT     lv_color_hex(0x0d2a)
+#define FILL_PLUS       lv_color_hex(0x0a2a)
+#define FILL_MINUS      lv_color_hex(0x4a12)
+#define FILL_RESET      lv_color_hex(0x2a2a)
 
 /* ====================== PID 参数存储 ====================== */
 typedef struct {
@@ -61,51 +67,23 @@ static PID_Motor_t mtr[PID_MOTOR_NUM] = {
 };
 
 static uint8_t cur_motor = PID_MOTOR_1;
-static uint8_t is_running[2] = {0, 0};  /* 每个电机独立的运行状态 */
+static uint8_t is_running[2] = {0, 0};
 
 /* 波形缓冲: 100 点 × 100ms = 10 秒 */
 #define WAVE_POINTS     100
-static float wave_target[WAVE_POINTS];
-static float wave_actual[WAVE_POINTS];
-static uint16_t wave_idx = 0;
+static float wave_target[2][WAVE_POINTS];
+static float wave_actual[2][WAVE_POINTS];
+static uint16_t wave_idx[2] = {0, 0};
 
-/* ====================== 按钮定义 ====================== */
-typedef struct {
-    uint16_t x1, y1, x2, y2;
-    uint8_t  id;
-} Button_t;
+/* ====================== LVGL 控件句柄 ====================== */
+static lv_obj_t *tab_m1, *tab_m2;
+static lv_obj_t *led_obj, *led_txt;
+static lv_obj_t *val[4];            /* 左栏参数值 */
+static lv_obj_t *ro[4];             /* 读数行数值 */
+static lv_obj_t *chart;
+static lv_chart_series_t *ser_target, *ser_actual;
 
-/* 左列参数按钮: [-] 和 [+] */
-/* Target: 标签 y=30, 按钮框 y=44~62 */
-/* Kp:     标签 y=68, 按钮框 y=82~100 */
-/* Ki:     标签 y=106, 按钮框 y=120~138 */
-/* Kd:     标签 y=144, 按钮框 y=158~176 */
-static Button_t btn_dec[4] = {
-    {  4,  44,  26,  62, 10 },   /* Target - */
-    {  4,  82,  26, 100, 11 },   /* Kp - */
-    {  4, 120,  26, 138, 12 },   /* Ki - */
-    {  4, 158,  26, 176, 13 },   /* Kd - */
-};
-static Button_t btn_inc[4] = {
-    {  94,  44, 116,  62, 20 },
-    {  94,  82, 116, 100, 21 },
-    {  94, 120, 116, 138, 22 },
-    {  94, 158, 116, 176, 23 },
-};
-
-/* 顶栏 M1/M2 切换 */
-static Button_t btn_m1 = { 110, 3, 140, 21, 30 };
-static Button_t btn_m2 = { 145, 3, 175, 21, 31 };
-
-/* 底栏按钮: START / STOP / STEP / RESET */
-/* y = 186 ~ 239, 4 等分 80px */
-static Button_t btn_start = {  0, 186,  79, 239, 40 };
-static Button_t btn_stop  = { 80, 186, 159, 239, 41 };
-static Button_t btn_step  = {160, 186, 239, 239, 42 };
-static Button_t btn_reset = {240, 186, 319, 239, 43 };
-
-/* ====================== XPT2046 触摸 (软件 SPI) ====================== */
-/* 沿用之前 main.c 的引脚定义 */
+/* ====================== XPT2046 触摸 (软件 SPI, 沿用旧版) ====================== */
 #define TP_PEN()      (GPIOC->IDR & GPIO_PIN_5)
 #define TP_CS_H()     (GPIOB->BSRR = GPIO_PIN_12)
 #define TP_CS_L()     (GPIOB->BSRR = GPIO_PIN_12<<16)
@@ -120,16 +98,13 @@ static void tp_udelay(void) { for (volatile int i=0;i<8;i++); }
 static void tp_init_hw(void)
 {
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOCEN;
-    /* PC5=PEN 上拉输入 */
-    GPIOC->MODER &= ~(3<<10);
+    GPIOC->MODER &= ~(3<<10);              /* PC5=PEN 上拉输入 */
     GPIOC->PUPDR &= ~(3<<10);
     GPIOC->PUPDR |=  (1<<10);
-    /* PB14=MISO 上拉输入 */
-    GPIOB->MODER &= ~(3<<28);
+    GPIOB->MODER &= ~(3<<28);              /* PB14=MISO 上拉输入 */
     GPIOB->PUPDR &= ~(3<<28);
     GPIOB->PUPDR |=  (1<<28);
-    /* PB12=CS PB13=CLK PB15=MOSI 推挽输出 */
-    GPIOB->MODER &= ~((3<<24)|(3<<26)|(3<<30));
+    GPIOB->MODER &= ~((3<<24)|(3<<26)|(3<<30));  /* PB12=CS PB13=CLK PB15=MOSI 推挽输出 */
     GPIOB->MODER |=  ((1<<24)|(1<<26)|(1<<30));
     GPIOB->OSPEEDR |= ((3<<24)|(3<<26)|(3<<30));
     TP_CS_H(); TP_CLK_H();
@@ -170,173 +145,125 @@ static uint8_t tp_get_point(uint16_t *x, uint16_t *y)
     return 1;
 }
 
-/* ====================== UI 绘制 ====================== */
-
-/* 立体按钮绘制: 圆角 + 顶部亮边 + 底部暗边 = 凸起效果 (无填充) */
-static void draw_button_3d(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2,
-                           uint16_t base_color, uint16_t border_color,
-                           const char *text, uint16_t text_color, uint8_t font_size)
+uint8_t PID_Screen_TouchGetPoint(uint16_t *x, uint16_t *y)
 {
-    uint16_t i;
-    /* 圆角半径 */
-    uint16_t r = 4;
-
-    /* 1. 顶部亮边 (模拟高光) */
-    lcd_draw_line(x1+r, y1, x2-r, y1, 0xFFFF);  /* 白色顶边 */
-    lcd_draw_line(x1, y1+r, x1, y2-r, 0xFFFF);  /* 左边亮线 */
-
-    /* 2. 底部暗边 (模拟阴影) */
-    lcd_draw_line(x1+r, y2, x2-r, y2, 0x0000);  /* 黑色底边 */
-    lcd_draw_line(x2, y1+r, x2, y2-r, 0x0000);  /* 右边暗线 */
-
-    /* 3. 圆角切角线 */
-    /* 左上角 */
-    for (i=0;i<r;i++) {
-        lcd_draw_line(x1+r-i, y1+i, x1+i, y1+r-i, border_color);
-    }
-    /* 右上角 */
-    for (i=0;i<r;i++) {
-        lcd_draw_line(x2-r+i, y1+i, x2-i, y1+r-i, border_color);
-    }
-    /* 左下角 */
-    for (i=0;i<r;i++) {
-        lcd_draw_line(x1+r-i, y2-i, x1+i, y2-r+i, border_color);
-    }
-    /* 右下角 */
-    for (i=0;i<r;i++) {
-        lcd_draw_line(x2-r+i, y2-i, x2-i, y2-r+i, border_color);
-    }
-
-    /* 4. 文字居中 */
-    uint16_t w = x2 - x1 + 1;
-    uint16_t h = y2 - y1 + 1;
-    uint16_t text_w = strlen(text) * font_size * 0.8;
-    uint16_t text_x = x1 + (w - text_w) / 2;
-    uint16_t text_y = y1 + (h - font_size) / 2;
-    lcd_show_string(text_x, text_y, w, h, font_size, (char*)text, text_color);
+    return tp_get_point(x, y);
 }
 
-/* 普通按钮 (小按钮用) */
-static void draw_button(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2,
-                        uint16_t bg_color, uint16_t border_color,
-                        const char *text, uint16_t text_color, uint8_t font_size)
+/* ====================== UI 构建 (与 html 一致) ====================== */
+
+static lv_obj_t *mk_label(lv_obj_t *parent, int x, int y, const char *txt,
+                          lv_color_t color, const lv_font_t *font)
 {
-    draw_button_3d(x1, y1, x2, y2, bg_color, border_color, text, text_color, font_size);
+    lv_obj_t *l = lv_label_create(parent);
+    lv_obj_set_pos(l, x, y);
+    lv_label_set_text(l, txt);
+    lv_obj_set_style_text_color(l, color, 0);
+    lv_obj_set_style_text_font(l, font, 0);
+    return l;
 }
 
-static void draw_static_ui(void)
+/* 示波器通道标签: 半透明底 + 色块 + 文字 (叠加在网格顶部) */
+static lv_obj_t *mk_ch_tag(lv_obj_t *parent, int x, lv_color_t c, const char *txt)
 {
-    char s[16];
-    int i;
+    lv_obj_t *bg = lv_obj_create(parent);
+    lv_obj_set_pos(bg, x, 2);
+    lv_obj_set_size(bg, 50, 12);
+    lv_obj_set_style_bg_color(bg, lv_color_hex(0x04090a), 0);
+    lv_obj_set_style_bg_opa(bg, LV_OPA_60, 0);
+    lv_obj_set_style_border_width(bg, 0, 0);
+    lv_obj_set_style_radius(bg, 3, 0);
+    lv_obj_set_style_pad_all(bg, 0, 0);
 
-    /* 顶栏 */
-    lcd_fill(0, 0, SCR_W-1, TOP_BAR_H-1, COL_PANEL);
-    lcd_show_string(4, 4, 70, 16, 12, "PID Tuner", COL_CYAN);
+    lv_obj_t *sw = lv_obj_create(bg);
+    lv_obj_set_pos(sw, 3, 2);
+    lv_obj_set_size(sw, 9, 9);
+    lv_obj_set_style_bg_color(sw, c, 0);
+    lv_obj_set_style_border_width(sw, 0, 0);
+    lv_obj_set_style_radius(sw, 1, 0);
+    lv_obj_set_style_pad_all(sw, 0, 0);
 
-    /* M1/M2 按钮 */
-    draw_button(btn_m1.x1, btn_m1.y1, btn_m1.x2, btn_m1.y2,
-                0x0d2a, COL_GREEN, "M1", COL_GREEN, 12);
-    draw_button(btn_m2.x1, btn_m2.y1, btn_m2.x2, btn_m2.y2,
-                COL_PANEL, COL_GRAY, "M2", COL_GRAY, 12);
-
-    /* RUN 状态灯 */
-    lcd_fill_circle(260, 12, 4, COL_GRAY);
-    lcd_show_string(268, 5, 40, 14, 12, "STOP", COL_GRAY);
-
-    /* 左列参数面板背景 */
-    lcd_fill(0, TOP_BAR_H, LEFT_PANEL_W-1, SCR_H-BOTTOM_BAR_H-1, COL_BG);
-    lcd_draw_rectangle(0, TOP_BAR_H, LEFT_PANEL_W-1, SCR_H-BOTTOM_BAR_H-1, COL_BORDER);
-
-    /* 4 组参数标签和按钮框 */
-    const char *labels[4] = {"Target", "Kp", "Ki", "Kd"};
-    uint16_t ys[4] = {30, 68, 106, 144};
-    for (i=0;i<4;i++) {
-        lcd_show_string(6, ys[i]-2, 50, 12, 12, (char*)labels[i], COL_GRAY);
-        /* - 按钮 (红色) */
-        draw_button(btn_dec[i].x1, btn_dec[i].y1, btn_dec[i].x2, btn_dec[i].y2,
-                    0x4a12, COL_RED, "-", COL_RED, 12);
-        /* + 按钮 (绿色) */
-        draw_button(btn_inc[i].x1, btn_inc[i].y1, btn_inc[i].x2, btn_inc[i].y2,
-                    0x0a2a, COL_GREEN, "+", COL_GREEN, 12);
-    }
-
-    /* 波形区 */
-    lcd_draw_rectangle(WAVE_X-2, WAVE_Y-2, WAVE_X+WAVE_W+1, WAVE_Y+WAVE_H+1, COL_BORDER);
-    lcd_show_string(WAVE_X+4, WAVE_Y-1, 80, 10, 12, "RPM Wave", COL_GRAY);
-
-    /* 波形网格横线: 0/100/200 rpm */
-    /* Y 轴: -50 ~ 250 rpm, 高 WAVE_H */
-    /* y(rpm) = WAVE_Y + WAVE_H - (rpm+50)/300*WAVE_H */
-
-    /* 读数行 */
-    lcd_draw_rectangle(WAVE_X-2, RO_Y, WAVE_X+WAVE_W+1, RO_Y+RO_H, COL_BORDER);
-    /* 4 列分隔线: 宽 195, 每列 ~48 */
-    lcd_draw_line(WAVE_X+48, RO_Y,     WAVE_X+48, RO_Y+RO_H, COL_BORDER);
-    lcd_draw_line(WAVE_X+97, RO_Y,     WAVE_X+97, RO_Y+RO_H, COL_BORDER);
-    lcd_draw_line(WAVE_X+146, RO_Y,    WAVE_X+146, RO_Y+RO_H, COL_BORDER);
-    lcd_show_string(WAVE_X+4,  RO_Y+2,  40, 10, 12, "RPM",   COL_GRAY);
-    lcd_show_string(WAVE_X+52, RO_Y+2,  40, 10, 12, "PWM%",  COL_GRAY);
-    lcd_show_string(WAVE_X+101,RO_Y+2,  40, 10, 12, "Overshoot", COL_GRAY);
-    lcd_show_string(WAVE_X+150,RO_Y+2,  40, 10, 12, "Err",   COL_GRAY);
-
-    /* 底栏 */
-    lcd_fill(0, SCR_H-BOTTOM_BAR_H, SCR_W-1, SCR_H-1, COL_PANEL);
-    lcd_draw_hline(0, SCR_H-BOTTOM_BAR_H, SCR_W, COL_BORDER);
-
-    /* 底栏 4 个大按钮 */
-    draw_button(0,   SCR_H-BOTTOM_BAR_H+5, 79,  SCR_H-5,
-                0x0a2a, COL_GREEN, "START", COL_GREEN, 16);
-    draw_button(80,  SCR_H-BOTTOM_BAR_H+5, 159, SCR_H-5,
-                0x4a12, COL_RED, "STOP", COL_RED, 16);
-    draw_button(160, SCR_H-BOTTOM_BAR_H+5, 239, SCR_H-5,
-                0x0d2a, COL_CYAN, "STEP", COL_CYAN, 16);
-    draw_button(240, SCR_H-BOTTOM_BAR_H+5, 319, SCR_H-5,
-                0x2a2a, COL_YELLOW, "RESET", COL_YELLOW, 16);
+    lv_obj_t *l = lv_label_create(bg);
+    lv_obj_set_pos(l, 14, 1);
+    lv_label_set_text(l, txt);
+    lv_obj_set_style_text_color(l, c, 0);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
+    return bg;
 }
 
-/* 数值刷新 (擦旧值再写新值) */
+/* 扁平 3D 风格按钮: 深底 + 亮色描边 + 亮色文字 */
+static lv_obj_t *mk_btn(lv_obj_t *parent, int x, int y, int w, int h,
+                        const char *txt, lv_color_t bg, lv_color_t border,
+                        lv_color_t fg, const lv_font_t *font)
+{
+    lv_obj_t *b = lv_btn_create(parent);
+    lv_obj_set_pos(b, x, y);
+    lv_obj_set_size(b, w, h);
+    lv_obj_set_style_bg_color(b, bg, 0);
+    lv_obj_set_style_border_color(b, border, 0);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_radius(b, 4, 0);
+    lv_obj_set_style_pad_all(b, 0, 0);
+    lv_obj_set_style_text_color(b, fg, 0);
+    lv_obj_set_style_text_font(b, font, 0);
+
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_set_style_text_color(l, fg, 0);
+    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_center(l);
+    return b;
+}
+
 static void draw_param_values(void)
 {
     char s[16];
     PID_Motor_t *m = &mtr[cur_motor];
-
-    /* 擦旧值区域 */
-    lcd_fill(32, 46,  90, 60, COL_BG);
-    lcd_fill(32, 84,  90, 98, COL_BG);
-    lcd_fill(32, 122, 90, 136, COL_BG);
-    lcd_fill(32, 160, 90, 174, COL_BG);
-
-    sprintf(s, "%.0f", m->target_rpm);
-    lcd_show_string(34, 48,  55, 16, 16, s, COL_YELLOW);
-    sprintf(s, "%.1f", m->kp);
-    lcd_show_string(34, 86,  55, 16, 16, s, COL_GREEN);
-    sprintf(s, "%.2f", m->ki);
-    lcd_show_string(34, 124, 55, 16, 16, s, COL_CYAN);
-    sprintf(s, "%.2f", m->kd);
-    lcd_show_string(34, 162, 55, 16, 16, s, COL_MAGENTA);
+    lv_snprintf(s, sizeof(s), "%.0f", m->target_rpm);  lv_label_set_text(val[0], s);
+    lv_snprintf(s, sizeof(s), "%.1f", m->kp);          lv_label_set_text(val[1], s);
+    lv_snprintf(s, sizeof(s), "%.2f", m->ki);          lv_label_set_text(val[2], s);
+    lv_snprintf(s, sizeof(s), "%.2f", m->kd);          lv_label_set_text(val[3], s);
 }
 
 static void draw_motor_tabs(void)
 {
-    /* 高亮当前电机 */
-    draw_button(btn_m1.x1, btn_m1.y1, btn_m1.x2, btn_m1.y2,
-                cur_motor==0 ? 0x0d2a : COL_PANEL,
-                cur_motor==0 ? COL_GREEN : COL_GRAY,
-                "M1", cur_motor==0 ? COL_GREEN : COL_GRAY, 12);
-    draw_button(btn_m2.x1, btn_m2.y1, btn_m2.x2, btn_m2.y2,
-                cur_motor==1 ? 0x0d2a : COL_PANEL,
-                cur_motor==1 ? COL_GREEN : COL_GRAY,
-                "M2", cur_motor==1 ? COL_GREEN : COL_GRAY, 12);
+    if (cur_motor == 0) {
+        lv_obj_set_style_bg_color(tab_m1, FILL_M1_ACT, 0);
+        lv_obj_set_style_border_color(tab_m1, COL_GREEN, 0);
+        lv_obj_set_style_text_color(tab_m1, COL_GREEN, 0);
+        lv_obj_set_style_bg_color(tab_m2, COL_PANEL, 0);
+        lv_obj_set_style_border_color(tab_m2, COL_GRAY, 0);
+        lv_obj_set_style_text_color(tab_m2, COL_GRAY, 0);
+    } else {
+        lv_obj_set_style_bg_color(tab_m1, COL_PANEL, 0);
+        lv_obj_set_style_border_color(tab_m1, COL_GRAY, 0);
+        lv_obj_set_style_text_color(tab_m1, COL_GRAY, 0);
+        lv_obj_set_style_bg_color(tab_m2, FILL_M1_ACT, 0);
+        lv_obj_set_style_border_color(tab_m2, COL_CYAN, 0);
+        lv_obj_set_style_text_color(tab_m2, COL_CYAN, 0);
+    }
 }
 
 static void draw_run_status(void)
 {
     uint8_t running = is_running[cur_motor];
-    lcd_fill_circle(260, 12, 4, running ? COL_GREEN : COL_GRAY);
-    lcd_fill(268, 5, 310, 19, COL_PANEL);
-    lcd_show_string(268, 5, 40, 14, 12,
-                    running ? "RUN" : "STOP",
-                    running ? COL_GREEN : COL_GRAY);
+    lv_obj_set_style_bg_color(led_obj, running ? COL_GREEN : COL_GRAY, 0);
+    lv_label_set_text(led_txt, running ? "RUN" : "STOP");
+    lv_obj_set_style_text_color(led_txt, running ? COL_GREEN : COL_GRAY, 0);
+}
+
+/* 把当前电机的环形波形缓冲按时间序写入图表 */
+static void draw_waveform(void)
+{
+    int m = cur_motor;
+    lv_coord_t *yt = lv_chart_get_y_array(chart, ser_target);
+    lv_coord_t *ya = lv_chart_get_y_array(chart, ser_actual);
+    for (int i = 0; i < WAVE_POINTS; i++) {
+        int idx = (wave_idx[m] + i) % WAVE_POINTS;
+        yt[i] = (lv_coord_t)wave_target[m][idx];
+        ya[i] = (lv_coord_t)wave_actual[m][idx];
+    }
+    lv_chart_refresh(chart);
 }
 
 static void draw_readout(void)
@@ -344,185 +271,323 @@ static void draw_readout(void)
     char s[16];
     PID_Motor_t *m = &mtr[cur_motor];
 
-    lcd_fill(WAVE_X+4,  RO_Y+15, WAVE_X+44,  RO_Y+33, COL_BG);
-    lcd_fill(WAVE_X+52, RO_Y+15, WAVE_X+93,  RO_Y+33, COL_BG);
-    lcd_fill(WAVE_X+101,RO_Y+15, WAVE_X+143, RO_Y+33, COL_BG);
-    lcd_fill(WAVE_X+150,RO_Y+15, WAVE_X+190, RO_Y+33, COL_BG);
-
-    sprintf(s, "%.1f", m->actual_rpm);
-    lcd_show_string(WAVE_X+4,  RO_Y+16, 42, 14, 12, s, COL_GREEN);
-
-    sprintf(s, "%d", (int)m->pwm_out);
-    lcd_show_string(WAVE_X+52, RO_Y+16, 40, 14, 12, s, COL_YELLOW);
-
+    lv_snprintf(s, sizeof(s), "%.1f", m->actual_rpm);  lv_label_set_text(ro[0], s);
+    lv_snprintf(s, sizeof(s), "%d", (int)m->pwm_out);  lv_label_set_text(ro[1], s);
     if (m->target_rpm > 1) {
-        sprintf(s, "%.1f%%", m->overshoot);
+        lv_snprintf(s, sizeof(s), "%.1f%%", m->overshoot);
     } else {
-        sprintf(s, "--");
+        lv_snprintf(s, sizeof(s), "--");
     }
-    lcd_show_string(WAVE_X+101,RO_Y+16, 42, 14, 12, s, COL_RED);
-
-    sprintf(s, "%.1f", m->target_rpm - m->actual_rpm);
-    lcd_show_string(WAVE_X+150,RO_Y+16, 42, 14, 12, s, COL_YELLOW);
+    lv_label_set_text(ro[2], s);
+    lv_snprintf(s, sizeof(s), "%.1f", m->target_rpm - m->actual_rpm);  lv_label_set_text(ro[3], s);
 }
 
-/* RPM -> 像素 y */
-static uint16_t rpm_to_y(float rpm)
+/* 电机切换: 重置该电机波形缓冲 */
+static void switch_motor(uint8_t m)
 {
-    float v = rpm;
-    if (v < -50) v = -50;
-    if (v > 250) v = 250;
-    return WAVE_Y + WAVE_H - 1 - (uint16_t)((v + 50.0f) / 300.0f * (WAVE_H - 2));
+    cur_motor = m;
+    draw_motor_tabs();
+    draw_param_values();
+    draw_run_status();
+    wave_idx[m] = 0;
+    for (int i = 0; i < WAVE_POINTS; i++) {
+        wave_target[m][i] = mtr[m].target_rpm;
+        wave_actual[m][i] = mtr[m].actual_rpm;
+    }
+    draw_waveform();
 }
 
-static void draw_waveform(void)
+/* ====================== 触摸事件回调 ====================== */
+static void ev_dec(lv_event_t *e)
 {
-    uint16_t i;
-    /* 清波形区 */
-    lcd_fill(WAVE_X, WAVE_Y, WAVE_X+WAVE_W-1, WAVE_Y+WAVE_H-1, COL_BG);
-
-    /* 网格 */
-    for (i=0;i<3;i++) {
-        uint16_t y = rpm_to_y(i*100.0f);
-        lcd_draw_hline(WAVE_X, y, WAVE_W, 0x12A6);
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    switch (idx) {
+        case 0: mtr[cur_motor].target_rpm -= 10; if (mtr[cur_motor].target_rpm < 0) mtr[cur_motor].target_rpm = 0; break;
+        case 1: mtr[cur_motor].kp -= 0.1f; if (mtr[cur_motor].kp < 0) mtr[cur_motor].kp = 0; break;
+        case 2: mtr[cur_motor].ki -= 0.05f; if (mtr[cur_motor].ki < 0) mtr[cur_motor].ki = 0; break;
+        case 3: mtr[cur_motor].kd -= 0.05f; if (mtr[cur_motor].kd < 0) mtr[cur_motor].kd = 0; break;
     }
-
-    /* 画旧波形 (先擦掉重画整屏, 简单可靠) */
-    /* 目标线 (黄色) */
-    for (i=0;i<WAVE_POINTS-1;i++) {
-        uint16_t i1 = (wave_idx + i) % WAVE_POINTS;
-        uint16_t i2 = (wave_idx + i + 1) % WAVE_POINTS;
-        uint16_t x1 = WAVE_X + (uint16_t)((float)i/(WAVE_POINTS-1)*WAVE_W);
-        uint16_t x2 = WAVE_X + (uint16_t)((float)(i+1)/(WAVE_POINTS-1)*WAVE_W);
-        lcd_draw_line(x1, rpm_to_y(wave_target[i1]), x2, rpm_to_y(wave_target[i2]), COL_YELLOW);
-    }
-    /* 实际线 (绿色) */
-    for (i=0;i<WAVE_POINTS-1;i++) {
-        uint16_t i1 = (wave_idx + i) % WAVE_POINTS;
-        uint16_t i2 = (wave_idx + i + 1) % WAVE_POINTS;
-        uint16_t x1 = WAVE_X + (uint16_t)((float)i/(WAVE_POINTS-1)*WAVE_W);
-        uint16_t x2 = WAVE_X + (uint16_t)((float)(i+1)/(WAVE_POINTS-1)*WAVE_W);
-        lcd_draw_line(x1, rpm_to_y(wave_actual[i1]), x2, rpm_to_y(wave_actual[i2]), COL_GREEN);
-    }
+    draw_param_values();
 }
 
-/* ====================== 触摸处理 ====================== */
-static uint8_t in_btn(uint16_t x, uint16_t y, Button_t *b)
+static void ev_inc(lv_event_t *e)
 {
-    return (x>=b->x1 && x<=b->x2 && y>=b->y1 && y<=b->y2);
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    switch (idx) {
+        case 0: mtr[cur_motor].target_rpm += 10; if (mtr[cur_motor].target_rpm > 250) mtr[cur_motor].target_rpm = 250; break;
+        case 1: mtr[cur_motor].kp += 0.1f; break;
+        case 2: mtr[cur_motor].ki += 0.05f; break;
+        case 3: mtr[cur_motor].kd += 0.05f; break;
+    }
+    draw_param_values();
 }
 
-static void tp_handle(void)
+static void ev_tab(lv_event_t *e)
 {
-    uint16_t x, y;
-    if (!tp_get_point(&x, &y)) return;
-
-    /* 左列 +/- 按钮 */
-    int i;
-    for (i=0;i<4;i++) {
-        if (in_btn(x, y, &btn_dec[i])) {
-            switch (i) {
-                case 0: mtr[cur_motor].target_rpm -= 10; if (mtr[cur_motor].target_rpm<0) mtr[cur_motor].target_rpm=0; break;
-                case 1: mtr[cur_motor].kp -= 0.1f; if (mtr[cur_motor].kp<0) mtr[cur_motor].kp=0; break;
-                case 2: mtr[cur_motor].ki -= 0.05f; if (mtr[cur_motor].ki<0) mtr[cur_motor].ki=0; break;
-                case 3: mtr[cur_motor].kd -= 0.05f; if (mtr[cur_motor].kd<0) mtr[cur_motor].kd=0; break;
-            }
-            draw_param_values();
-            vTaskDelay(pdMS_TO_TICKS(150));  /* 简单去抖 */
-            return;
-        }
-        if (in_btn(x, y, &btn_inc[i])) {
-            switch (i) {
-                case 0: mtr[cur_motor].target_rpm += 10; if (mtr[cur_motor].target_rpm>250) mtr[cur_motor].target_rpm=250; break;
-                case 1: mtr[cur_motor].kp += 0.1f; break;
-                case 2: mtr[cur_motor].ki += 0.05f; break;
-                case 3: mtr[cur_motor].kd += 0.05f; break;
-            }
-            draw_param_values();
-            vTaskDelay(pdMS_TO_TICKS(150));
-            return;
-        }
-    }
-
-    /* M1/M2 */
-    if (in_btn(x, y, &btn_m1)) {
-        cur_motor = PID_MOTOR_1;
-        draw_motor_tabs(); draw_param_values();
-        /* 清空波形并重置索引 */
-        wave_idx = 0;
-        for (i=0;i<WAVE_POINTS;i++) {
-            wave_target[i] = mtr[cur_motor].target_rpm;
-            wave_actual[i] = mtr[cur_motor].actual_rpm;
-        }
-        draw_waveform();
-        vTaskDelay(pdMS_TO_TICKS(150));
-        return;
-    }
-    if (in_btn(x, y, &btn_m2)) {
-        cur_motor = PID_MOTOR_2;
-        draw_motor_tabs(); draw_param_values();
-        wave_idx = 0;
-        for (i=0;i<WAVE_POINTS;i++) {
-            wave_target[i] = mtr[cur_motor].target_rpm;
-            wave_actual[i] = mtr[cur_motor].actual_rpm;
-        }
-        draw_waveform();
-        vTaskDelay(pdMS_TO_TICKS(150));
-        return;
-    }
-
-    /* 底栏按钮 - 只控制当前选中的电机 */
-    if (in_btn(x, y, &btn_start)) {
-        is_running[cur_motor] = 1;
-        draw_run_status();
-        vTaskDelay(pdMS_TO_TICKS(150));
-        return;
-    }
-    if (in_btn(x, y, &btn_stop)) {
-        is_running[cur_motor] = 0;
-        mtr[cur_motor].pwm_out = 0;
-        draw_run_status();
-        vTaskDelay(pdMS_TO_TICKS(150));
-        return;
-    }
-    if (in_btn(x, y, &btn_step)) {
-        /* 在 100 和 200 之间切换目标 */
-        if (mtr[cur_motor].target_rpm < 150) mtr[cur_motor].target_rpm = 200;
-        else mtr[cur_motor].target_rpm = 100;
-        mtr[cur_motor].peak_rpm = mtr[cur_motor].actual_rpm;
-        mtr[cur_motor].overshoot = 0;
-        mtr[cur_motor].step_armed = 1;
-        draw_param_values();
-        vTaskDelay(pdMS_TO_TICKS(150));
-        return;
-    }
-    if (in_btn(x, y, &btn_reset)) {
-        mtr[cur_motor].kp = 2.0f;
-        mtr[cur_motor].ki = 0.50f;
-        mtr[cur_motor].kd = 0.20f;
-        draw_param_values();
-        vTaskDelay(pdMS_TO_TICKS(150));
-        return;
-    }
+    int m = (int)(intptr_t)lv_event_get_user_data(e);
+    switch_motor((uint8_t)m);
 }
 
-/* ====================== 对外接口 ====================== */
-void PID_Screen_Init(void)
+static void ev_start(lv_event_t *e) { (void)e; is_running[cur_motor] = 1; draw_run_status(); }
+static void ev_stop(lv_event_t *e)  { (void)e; is_running[cur_motor] = 0; mtr[cur_motor].pwm_out = 0; draw_run_status(); }
+
+static void ev_step(lv_event_t *e)
 {
-    int i;
-    tp_init_hw();
-    for (i=0;i<WAVE_POINTS;i++) {
-        wave_target[i] = 0;
-        wave_actual[i] = 0;
+    (void)e;
+    if (mtr[cur_motor].target_rpm < 150) mtr[cur_motor].target_rpm = 200;
+    else                                 mtr[cur_motor].target_rpm = 100;
+    mtr[cur_motor].peak_rpm   = mtr[cur_motor].actual_rpm;
+    mtr[cur_motor].overshoot  = 0;
+    mtr[cur_motor].step_armed = 1;
+    draw_param_values();
+}
+
+static void ev_reset(lv_event_t *e)
+{
+    (void)e;
+    mtr[cur_motor].kp = 2.0f;
+    mtr[cur_motor].ki = 0.50f;
+    mtr[cur_motor].kd = 0.20f;
+    draw_param_values();
+}
+
+/* ====================== UI 搭建 ====================== */
+static void build_ui(void)
+{
+    const lv_font_t *f12 = &lv_font_montserrat_12;
+    const lv_font_t *f16 = &lv_font_montserrat_16;
+
+    /* 主屏黑底 */
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_set_style_bg_color(scr, COL_BLACK, 0);
+
+    /* ===== 顶栏 ===== */
+    lv_obj_t *top = lv_obj_create(scr);
+    lv_obj_set_pos(top, 0, 0);
+    lv_obj_set_size(top, SCR_W, 24);
+    lv_obj_set_style_bg_color(top, COL_PANEL, 0);
+    lv_obj_set_style_border_width(top, 0, 0);
+    lv_obj_set_style_radius(top, 0, 0);
+    lv_obj_set_style_pad_all(top, 0, 0);
+
+    mk_label(top, 4, 4, "PID Tuner", COL_CYAN, f12);
+
+    tab_m1 = mk_btn(top, 110, 3, 31, 18, "M1", FILL_M1_ACT, COL_GREEN, COL_GREEN, f12);
+    tab_m2 = mk_btn(top, 145, 3, 31, 18, "M2", COL_PANEL, COL_GRAY, COL_GRAY, f12);
+
+    led_obj = lv_obj_create(top);
+    lv_obj_set_pos(led_obj, 256, 8);
+    lv_obj_set_size(led_obj, 9, 9);
+    lv_obj_set_style_radius(led_obj, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(led_obj, COL_GRAY, 0);
+    lv_obj_set_style_border_width(led_obj, 0, 0);
+    lv_obj_set_style_pad_all(led_obj, 0, 0);
+    led_txt = mk_label(top, 269, 4, "STOP", COL_GRAY, f12);
+
+    /* ===== 左栏参数面板 ===== */
+    lv_obj_t *left = lv_obj_create(scr);
+    lv_obj_set_pos(left, 0, 24);
+    lv_obj_set_size(left, 120, 162);
+    lv_obj_set_style_bg_color(left, COL_BLACK, 0);
+    lv_obj_set_style_border_color(left, COL_BORDER, 0);
+    lv_obj_set_style_border_width(left, 1, 0);
+    lv_obj_set_style_radius(left, 0, 0);
+    lv_obj_set_style_pad_all(left, 0, 0);
+
+    const char *labels[4] = {"Target", "Kp", "Ki", "Kd"};
+    int ly[4] = {26, 64, 102, 140};
+    int vy[4] = {48, 86, 124, 162};
+    lv_color_t vcol[4] = {COL_YELLOW, COL_GREEN, COL_CYAN, COL_MAGENTA};
+
+    for (int i = 0; i < 4; i++) {
+        mk_label(left, 6, ly[i], labels[i], COL_GRAY, f12);
+        val[i] = mk_label(left, 34, vy[i], "", vcol[i], f16);
+
+        lv_obj_t *dec = mk_btn(left, 4,  ly[i]+18, 23, 19, "-", FILL_MINUS, COL_RED, COL_RED, f12);
+        lv_obj_t *inc = mk_btn(left, 94, ly[i]+18, 23, 19, "+", FILL_PLUS, COL_GREEN, COL_GREEN, f12);
+        lv_obj_add_event_cb(dec, ev_dec, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(inc, ev_inc, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
-    wave_idx = 0;
-    draw_static_ui();
+
+    /* ===== 波形区 (示波器风格) ===== */
+    lv_obj_t *wavebox = lv_obj_create(scr);
+    lv_obj_set_pos(wavebox, 120, 25);
+    lv_obj_set_size(wavebox, 199, 117);
+    lv_obj_set_style_bg_color(wavebox, COL_BLACK, 0);
+    lv_obj_set_style_border_color(wavebox, COL_BORDER, 0);
+    lv_obj_set_style_border_width(wavebox, 1, 0);
+    lv_obj_set_style_radius(wavebox, 0, 0);
+    lv_obj_set_style_pad_all(wavebox, 0, 0);
+
+    /* 示波器网格背景 (静态图, 与 HTML 一致) */
+    lv_obj_t *grid = lv_img_create(wavebox);
+    lv_img_set_src(grid, &wave_grid);
+    lv_obj_set_pos(grid, 1, 1);
+
+    chart = lv_chart_create(wavebox);
+    lv_obj_set_pos(chart, 1, 1);
+    lv_obj_set_size(chart, 195, 113);
+    lv_obj_set_style_bg_opa(chart, LV_OPA_TRANSP, 0);    /* 透明, 露出网格 */
+    lv_obj_set_style_border_width(chart, 0, 0);
+    lv_obj_set_style_pad_all(chart, 0, 0);
+    lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(chart, WAVE_POINTS);
+    lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, -50, 250);
+    lv_chart_set_div_line_count(chart, 0, 0);
+    lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 0, 0, 0, 0, false, 0);
+    lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 0, 0, 0, 0, false, 0);
+    lv_obj_set_style_line_width(chart, 2, LV_PART_ITEMS);
+    lv_obj_set_style_line_rounded(chart, true, LV_PART_ITEMS);
+
+    ser_target = lv_chart_add_series(chart, lv_color_hex(0xFFD34D), LV_CHART_AXIS_PRIMARY_Y);
+    ser_actual = lv_chart_add_series(chart, lv_color_hex(0x39FF8B), LV_CHART_AXIS_PRIMARY_Y);
+
+    /* 通道标签 + 时基 (叠加在网格顶部) */
+    mk_ch_tag(wavebox, 4, lv_color_hex(0xFFD34D), "Target");
+    mk_ch_tag(wavebox, 54, lv_color_hex(0x39FF8B), "Actual");
+    mk_label(wavebox, 150, 3, "1 s/div", COL_GRAY, f12);
+
+    /* ===== 读数行 ===== */
+    lv_obj_t *robox = lv_obj_create(scr);
+    lv_obj_set_pos(robox, 120, 145);
+    lv_obj_set_size(robox, 199, 40);
+    lv_obj_set_style_bg_color(robox, COL_BLACK, 0);
+    lv_obj_set_style_border_color(robox, COL_BORDER, 0);
+    lv_obj_set_style_border_width(robox, 1, 0);
+    lv_obj_set_style_radius(robox, 0, 0);
+    lv_obj_set_style_pad_all(robox, 0, 0);
+
+    const char *roh[4] = {"RPM", "PWM%", "OVS%", "ERR"};
+    int rox[4] = {0, 50, 100, 150};
+    lv_color_t rocol[4] = {COL_GREEN, COL_YELLOW, COL_RED, COL_YELLOW};
+    for (int i = 0; i < 4; i++) {
+        /* 列标签: 宽49, 居中 */
+        lv_obj_t *rh = lv_label_create(robox);
+        lv_obj_set_pos(rh, rox[i], 3);
+        lv_obj_set_width(rh, 49);
+        lv_label_set_text(rh, roh[i]);
+        lv_obj_set_style_text_color(rh, COL_GRAY, 0);
+        lv_obj_set_style_text_font(rh, f12, 0);
+        lv_obj_set_style_text_align(rh, LV_TEXT_ALIGN_CENTER, 0);
+        /* 数值: 宽49, 居中 */
+        lv_obj_t *rv = lv_label_create(robox);
+        lv_obj_set_pos(rv, rox[i], 19);
+        lv_obj_set_width(rv, 49);
+        lv_label_set_text(rv, "");
+        lv_obj_set_style_text_color(rv, rocol[i], 0);
+        lv_obj_set_style_text_font(rv, f12, 0);
+        lv_obj_set_style_text_align(rv, LV_TEXT_ALIGN_CENTER, 0);
+        ro[i] = rv;
+    }
+    /* 水平分隔线 (标签/数值之间) */
+    lv_obj_t *hsep = lv_obj_create(robox);
+    lv_obj_set_pos(hsep, 0, 15);
+    lv_obj_set_size(hsep, 199, 1);
+    lv_obj_set_style_bg_color(hsep, COL_BORDER, 0);
+    lv_obj_set_style_border_width(hsep, 0, 0);
+    lv_obj_set_style_pad_all(hsep, 0, 0);
+    /* 列分隔线 */
+    int sepX[3] = {50, 99, 149};
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *sep = lv_obj_create(robox);
+        lv_obj_set_pos(sep, sepX[i], 0);
+        lv_obj_set_size(sep, 1, 40);
+        lv_obj_set_style_bg_color(sep, COL_BORDER, 0);
+        lv_obj_set_style_border_width(sep, 0, 0);
+        lv_obj_set_style_pad_all(sep, 0, 0);
+    }
+
+    /* ===== 底栏 ===== */
+    lv_obj_t *bar = lv_obj_create(scr);
+    lv_obj_set_pos(bar, 0, 186);
+    lv_obj_set_size(bar, SCR_W, 54);
+    lv_obj_set_style_bg_color(bar, COL_PANEL, 0);
+    lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_radius(bar, 0, 0);
+    lv_obj_set_style_pad_all(bar, 0, 0);
+
+    lv_obj_t *b_start = mk_btn(bar, 0,  5, 80, 44, "START", FILL_PLUS,  COL_GREEN,  COL_GREEN,  f16);
+    lv_obj_t *b_stop  = mk_btn(bar, 80, 5, 80, 44, "STOP",  FILL_MINUS, COL_RED,    COL_RED,    f16);
+    lv_obj_t *b_step  = mk_btn(bar, 160,5, 80, 44, "STEP",  FILL_M1_ACT,COL_CYAN,   COL_CYAN,   f16);
+    lv_obj_t *b_reset = mk_btn(bar, 240,5, 80, 44, "RESET", FILL_RESET, COL_YELLOW, COL_YELLOW, f16);
+    lv_obj_add_event_cb(b_start, ev_start, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(b_stop,  ev_stop,  LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(b_step,  ev_step,  LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(b_reset, ev_reset, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_add_event_cb(tab_m1, ev_tab, LV_EVENT_CLICKED, (void *)(intptr_t)PID_MOTOR_1);
+    lv_obj_add_event_cb(tab_m2, ev_tab, LV_EVENT_CLICKED, (void *)(intptr_t)PID_MOTOR_2);
+
+    /* 初始状态 */
     draw_motor_tabs();
     draw_param_values();
     draw_run_status();
     draw_waveform();
 }
 
+/* ====================== 对外接口 ====================== */
+void PID_Screen_Init(void)
+{
+    int m, i;
+    tp_init_hw();
+
+    lv_init();
+    lv_port_disp_init();
+    lv_port_indev_init();
+
+    for (m = 0; m < PID_MOTOR_NUM; m++) {
+        for (i = 0; i < WAVE_POINTS; i++) {
+            wave_target[m][i] = 0;
+            wave_actual[m][i] = 0;
+        }
+        wave_idx[m] = 0;
+    }
+
+    build_ui();
+}
+
+/* ---- FreeRTOS 任务: 10ms 周期, 驱动 LVGL ---- */
+void PID_Screen_Task(void * argument)
+{
+    TickType_t last_wave = 0;
+    TickType_t last_ro   = 0;
+    TickType_t last_tick;
+    TickType_t now;
+
+    (void)argument;
+    last_tick = xTaskGetTickCount();
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        now = xTaskGetTickCount();
+
+        /* LVGL tick 递增 (FreeRTOS 1ms tick 作为时钟源) */
+        lv_tick_inc(now - last_tick);
+        last_tick = now;
+
+        /* 驱动 LVGL: 处理事件/触摸/刷新 */
+        lv_timer_handler();
+
+        /* 波形: 每 100ms 推一个点 */
+        if ((now - last_wave) >= 100) {
+            last_wave = now;
+            int m = cur_motor;
+            wave_target[m][wave_idx[m]] = mtr[m].target_rpm;
+            wave_actual[m][wave_idx[m]] = mtr[m].actual_rpm;
+            wave_idx[m]++;
+            if (wave_idx[m] >= WAVE_POINTS) wave_idx[m] = 0;
+            draw_waveform();
+        }
+
+        /* 读数: 每 200ms 刷新 */
+        if ((now - last_ro) >= 200) {
+            last_ro = now;
+            draw_readout();
+        }
+    }
+}
+
+/* ---- 主程序数据接口 ---- */
 void PID_Screen_SetActualRPM(uint8_t motor, float rpm)
 {
     if (motor >= PID_MOTOR_NUM) return;
@@ -545,50 +610,10 @@ void PID_Screen_SetPWMOUT(uint8_t motor, float pct)
     mtr[motor].pwm_out = pct;
 }
 
-float PID_Screen_GetKp(uint8_t motor)    { return mtr[motor].kp; }
-float PID_Screen_GetKi(uint8_t motor)    { return mtr[motor].ki; }
-float PID_Screen_GetKd(uint8_t motor)    { return mtr[motor].kd; }
-float PID_Screen_GetTargetRPM(uint8_t motor) { return mtr[motor].target_rpm; }
-uint8_t PID_Screen_IsRunning(void)       { return is_running[cur_motor]; }
+float PID_Screen_GetKp(uint8_t motor)         { return mtr[motor].kp; }
+float PID_Screen_GetKi(uint8_t motor)         { return mtr[motor].ki; }
+float PID_Screen_GetKd(uint8_t motor)         { return mtr[motor].kd; }
+float PID_Screen_GetTargetRPM(uint8_t motor)  { return mtr[motor].target_rpm; }
+uint8_t PID_Screen_IsRunning(void)            { return is_running[cur_motor]; }
 uint8_t PID_Screen_IsMotorRunning(uint8_t motor) { return is_running[motor]; }
-uint8_t PID_Screen_GetCurrentMotor(void) { return cur_motor; }
-
-/* ---- FreeRTOS 任务 ---- */
-void PID_Screen_Task(void * argument)
-{
-    TickType_t last_wave = 0;
-    TickType_t last_ro   = 0;
-    TickType_t now;
-    int i;
-
-    (void)argument;
-
-    /* 把 pwm_out 也暴露一下: 主程序算完 PWM 后写回 mtr[i].pwm_out */
-    /* 这里通过外部函数间接更新, 简化处理: 主程序在 PID 计算后调用
-       PID_Screen_SetActualRPM() 同时也应把 PWM 写入, 这里另开一个函数
-       见 pid_screen.h 末尾注释 */
-
-    for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-        now = xTaskGetTickCount();
-
-        /* 触摸扫描 */
-        tp_handle();
-
-        /* 波形: 每 100ms 推一个点 */
-        if ((now - last_wave) >= 100) {
-            last_wave = now;
-            wave_target[wave_idx] = mtr[cur_motor].target_rpm;
-            wave_actual[wave_idx] = mtr[cur_motor].actual_rpm;
-            wave_idx++;
-            if (wave_idx >= WAVE_POINTS) wave_idx = 0;
-            draw_waveform();
-        }
-
-        /* 读数: 每 200ms 刷新一次 (降低闪烁) */
-        if ((now - last_ro) >= 200) {
-            last_ro = now;
-            draw_readout();
-        }
-    }
-}
+uint8_t PID_Screen_GetCurrentMotor(void)      { return cur_motor; }
