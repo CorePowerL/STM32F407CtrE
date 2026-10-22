@@ -569,8 +569,8 @@ void PID_Screen_Task(void * argument)
         /* 驱动 LVGL: 处理事件/触摸/刷新 */
         lv_timer_handler();
 
-        /* 波形: 每 100ms 推一个点 */
-        if ((now - last_wave) >= 100) {
+        /* 波形: 每 50ms 推一个点 (100点 × 50ms = 5秒窗口) */
+        if ((now - last_wave) >= 50) {
             last_wave = now;
             int m = cur_motor;
             wave_target[m][wave_idx[m]] = mtr[m].target_rpm;

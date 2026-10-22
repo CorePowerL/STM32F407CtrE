@@ -32,17 +32,22 @@ static PID_Data_t pid[2] = {
     { 0, 0, 0, 0 }
 };
 
-/* 编码器线数 (减速后每圈脉冲数)
- * 11线编码器 × 4倍频(编码器模式3) × 30减速比 = 1320 */
-#define PULSE_PER_REV   1320.0f
-/* 采样周期 ms */
-#define SAMPLE_DT_MS    100
+/* 编码器线数 (减速后每转脉冲数)
+ * 手转输出轴一圈实测约 1594 脉冲 (原 1320 标定错误, 2026-10-22 修正) */
+#define PULSE_PER_REV   1594.0f
+/* 采样周期 ms (PID 控制周期)
+ * 原 100ms 太慢导致正弦振荡, 改成 5ms 快速控制 */
+#define SAMPLE_DT_MS    5
 
-/* 临时开环诊断开关: M2 固定 50% 正转, 看编码器原始计数
- * 屏幕上 PWM% 位显示的是"100ms 内原始脉冲数" (不取反)
- * 正常应稳定在 ~275 且为正; 若乱跳/为负则是硬件问题
- * 诊断完改回 0 */
-#define M2_OPENLOOP_TEST   1
+/* 诊断模式:
+ *   0 = 正常闭环 PID
+ *   1 = 开环 35% 正转, 看 100ms 脉冲数 (已验证硬件正常)
+ *   2 = 手动计数模式: 电机不转, 用手转 M2 输出轴, 屏幕显示累计脉冲数
+ *       → 用来标定 PULSE_PER_REV (转一整圈看数字涨了多少) */
+#define M2_OPENLOOP_TEST   0
+
+/* 手动计数模式下累计的脉冲数 (防 16 位溢出) */
+static int32_t m2_total_pulses = 0;
 
 /* ====================== PID 任务 ====================== */
 static void PID_Task(void *pv)
@@ -66,8 +71,20 @@ static void PID_Task(void *pv)
                 continue;
             }
 
-#if M2_OPENLOOP_TEST
-            /* ===== 开环诊断: M2 固定 50% 正转, 不做闭环 ===== */
+#if M2_OPENLOOP_TEST == 2
+            /* ===== 手动计数模式: 电机不转, 累计编码器脉冲数 ===== */
+            if (i == 1) {
+                Motor_SetSpeed(1, 0);                 /* 电机断电, 纯手动转 */
+                int16_t raw = Encoder_GetCount(1);     /* 100ms 内增量 */
+                m2_total_pulses += raw;                /* 累计, 防溢出 */
+                /* RPM 位显示累计脉冲数 (转一圈看涨了多少)
+                 * PWM% 位显示本次增量 (用来观察手转时是否稳定) */
+                PID_Screen_SetActualRPM(1, (float)m2_total_pulses);
+                PID_Screen_SetPWMOUT(1, (float)raw);
+                continue;
+            }
+#elif M2_OPENLOOP_TEST == 1
+            /* ===== 开环诊断: M2 固定 35% 正转, 不做闭环 ===== */
             if (i == 1) {
                 Motor_SetSpeed(1, 35);                /* 固定正转 35% (启动临界) */
                 int16_t raw = Encoder_GetCount(1);    /* 100ms 内原始计数, 不取反 */
@@ -83,8 +100,9 @@ static void PID_Task(void *pv)
             actual = -actual;
             pid[i].rpm = actual;
 
-            /* 低通滤波: 0.5/0.5 减少相位滞后 (原 0.7/0.3 滞后大, 导致过冲) */
-            pid[i].rpm_filtered = pid[i].rpm_filtered * 0.5f + actual * 0.5f;
+            /* 低通滤波: 控制周期 5ms, 用 0.95/0.05 强滤波滤掉编码器噪声
+             * 时间常数 ~100ms, 平滑波形抖动 */
+            pid[i].rpm_filtered = pid[i].rpm_filtered * 0.95f + actual * 0.05f;
             actual = pid[i].rpm_filtered;
 
             /* 读屏幕参数 (每个电机有自己独立的参数) */
@@ -113,15 +131,11 @@ static void PID_Task(void *pv)
             }
             float pwm = pwm_new;
 
-            /* M2 启动死区: 只在电机静止时(实际转速<5rpm)应用
-             * M2 启动需要约 35% PWM, 小占空比静止时转不起来
-             * 电机一旦转起来(actual>=5), 维持转速只需小 PWM,
-             * 此时不能再清零, 否则会启停循环震荡
-             * M1 启动转矩小, 不需要死区 */
-            if (i == 1 && actual < 5.0f) {
-                if (pwm > 0 && pwm < 35) pwm = 0;
-                if (pwm < 0 && pwm > -35) pwm = 0;
-            }
+            /* M2 死区补偿已删除 (用户要求)
+             * if (i == 1 && actual < 0.5f) {
+             *     if (pwm > 0 && pwm < 35) pwm = 0;
+             *     if (pwm < 0 && pwm > -35) pwm = 0;
+             * } */
 
             if (pwm > 100)  pwm = 100;
             if (pwm < -100) pwm = -100;
@@ -154,8 +168,8 @@ int main(void)
     Encoder_Init();
     PID_Screen_Init();
 
-    xTaskCreate(PID_Screen_Task, "UI", 1024, NULL, 3, NULL);
-    xTaskCreate(PID_Task,        "PID", 256, NULL, 2, NULL);
+    xTaskCreate(PID_Task,        "PID", 256, NULL, 3, NULL);
+    xTaskCreate(PID_Screen_Task, "UI",  1024, NULL, 2, NULL);
 
     vTaskStartScheduler();
     while (1);
