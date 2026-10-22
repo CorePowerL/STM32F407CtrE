@@ -56,4 +56,7 @@ uint8_t PID_Screen_IsMotorRunning(uint8_t motor);
 /* 获取当前选中的电机 (0=M1, 1=M2) */
 uint8_t PID_Screen_GetCurrentMotor(void);
 
+/* 触摸读取 (XPT2046, 软件 SPI), 成功返回 1 并输出映射到 320x240 的坐标 */
+uint8_t PID_Screen_TouchGetPoint(uint16_t *x, uint16_t *y);
+
 #endif /* __PID_SCREEN_H */

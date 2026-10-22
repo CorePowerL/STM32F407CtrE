@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STM32F407 PID 调参屏 · 与 pid_screen.c 一致</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%230b3d91'/><rect x='14' y='20' width='72' height='48' rx='4' fill='none' stroke='%2334d399' stroke-width='3'/><path d='M18 46 H34 L44 32 L60 58 L72 38 H86' fill='none' stroke='%23fbbf24' stroke-width='3' stroke-linejoin='round'/></svg>">
+<style>
+  :root{
+    --bg:#070c16; --bg-2:#0a1220;
+    --panel:#0d1728; --panel-2:#101e33;
+    --line:#1d2f4a; --line-soft:#16263e;
+    --ink:#dde8f6; --ink-2:#a6b9d2; --ink-3:#6f84a2;
+    --blue:#3b9dff; --blue-deep:#0b3d91; --blue-soft:#1b4f96;
+    --cyan:#22d3ee; --green:#34d399; --yellow:#fbbf24; --red:#f87171; --magenta:#e879f9;
+    --shadow:0 18px 45px rgba(0,0,0,.45);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+    min-height:100vh;
+    background-image:
+      radial-gradient(1100px 520px at 50% -12%, rgba(11,61,145,.55) 0%, rgba(11,61,145,0) 60%),
+      radial-gradient(700px 380px at 88% 8%, rgba(34,211,238,.12) 0%, rgba(34,211,238,0) 55%),
+      linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 45%, #05080f 100%);
+    background-attachment:fixed;
+  }
+  /* 科技网格点阵 */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background-image:radial-gradient(rgba(120,160,220,.10) 1px, transparent 1.4px);
+    background-size:26px 26px;
+    mask-image:linear-gradient(180deg, rgba(0,0,0,.7), transparent 70%);
+  }
+  .page{ position:relative; z-index:1; max-width:1200px; margin:0 auto; padding:30px 20px 46px; }
+
+  /* ---- 标题区 ---- */
+  .masthead{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:26px; }
+  .brand{ display:flex; align-items:center; gap:13px; }
+  .brand .logo{ width:44px; height:44px; border-radius:12px; flex:none;
+    background:linear-gradient(160deg,#1656b6,#0b3d91 70%);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 8px 20px rgba(11,61,145,.5), inset 0 1px 0 rgba(255,255,255,.18); }
+  .brand h1{ font-size:21px; font-weight:700; letter-spacing:.3px; color:#f2f7ff; line-height:1.2; }
+  .brand .sub{ font-size:12px; color:var(--ink-3); margin-top:2px; letter-spacing:.3px; }
+  .pills{ margin-left:auto; display:flex; gap:7px; flex-wrap:wrap; }
+  .pill{ font-size:11px; color:#bcd4f2; padding:5px 11px; border-radius:20px;
+    background:rgba(20,38,64,.7); border:1px solid var(--line); display:inline-flex; align-items:center; gap:6px; }
+  .pill .dot{ width:6px; height:6px; border-radius:50%; background:var(--cyan); }
+  .pill.git{ color:#cfe6ff; border-color:var(--blue-soft); }
+  .pill.git .dot{ background:var(--blue); }
+
+  .layout{ display:flex; gap:28px; align-items:flex-start; flex-wrap:wrap; }
+
+  /* ---- LCD 设备 ---- */
+  .device{ flex:1 1 400px; min-width:320px; }
+  .bezel{
+    border-radius:22px; padding:20px 20px 0;
+    background:linear-gradient(165deg,#2a3442 0%,#191f29 55%,#12171f 100%);
+    border:1px solid #3a4656;
+    box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,.09), inset 0 -2px 6px rgba(0,0,0,.5);
+    position:relative; overflow:hidden;
+  }
+  .bezel::before{ content:""; position:absolute; top:0; left:0; right:0; height:42px;
+    background:linear-gradient(180deg, rgba(255,255,255,.07), transparent); pointer-events:none; }
+  .lcd-stage{ position:relative; margin:0 auto; }
+  .lcd{
+    position:absolute; top:0; left:0; width:320px; height:240px;
+    background:#000; transform-origin:0 0; overflow:hidden; user-select:none;
+    border-radius:2px;
+    box-shadow:0 0 0 2px #0a0d12, 0 0 0 3px #39434f, 0 12px 28px rgba(0,0,0,.6);
+  }
+  /* 屏幕玻璃反光 */
+  .lcd::after{ content:""; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(135deg, rgba(255,255,255,.10) 0%, rgba(255,255,255,.02) 22%, transparent 40%); }
+  .bezel-foot{ display:flex; align-items:center; gap:9px; padding:14px 2px 15px; }
+  .bezel-foot .pwr{ width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); }
+  .bezel-foot .cap{ font-size:11.5px; color:#93a3b8; }
+  .bezel-foot .cap b{ color:#cfe0f5; font-weight:600; }
+
+  /* ---- 屏幕内元素：简约高端仪器风（深色中性 + 单一强调色） ---- */
+  .topbar{ position:absolute; left:0; top:0; width:320px; height:24px;
+    background:#0f1318; border-bottom:1px solid rgba(255,255,255,.06); }
+  .topbar .menu{ display:none; }
+  .topbar .t{ position:absolute; left:10px; top:6px; font-size:9px; color:#5a6472;
+    letter-spacing:2px; font-weight:600; }
+  /* Tab：选中态仅靠文字亮度 + 底部 2px 细线，无彩色块 */
+  .chtag{ position:absolute; top:0; height:24px; padding:0 12px;
+    font-size:11px; font-weight:600; display:flex; align-items:center;
+    color:#5a6472; background:transparent; box-shadow:none; cursor:pointer; border-radius:0; }
+  .chtag small{ display:none; }
+  .chtag.sel{ color:#e6eaf0; }
+  .chtag.sel::after{ content:""; position:absolute; left:8px; right:8px; bottom:0; height:2px;
+    background:#4a9eff; border-radius:1px; }
+  .led{ position:absolute; right:6px; top:9px; width:6px; height:6px; border-radius:50%;
+    background:#3a414c; }
+  .led.on{ background:#4a9eff; box-shadow:none; }
+  .ledtxt{ position:absolute; right:16px; top:6px; font-size:9px; color:#5a6472;
+    font-weight:600; letter-spacing:1.5px; }
+  .ledtxt.on{ color:#8fb8ec; }
+
+  .leftpanel{ position:absolute; left:0; top:24px; width:90px; height:162px;
+    background:#0c0f14; border-right:1px solid rgba(255,255,255,.06); }
+  .lbl{ position:absolute; left:10px; font-size:8.5px; color:#5a6472;
+    letter-spacing:1.5px; font-weight:600; }
+  .val{ position:absolute; left:26px; width:38px; font-size:15px; font-weight:600;
+    text-align:center; color:#e6eaf0; line-height:16px; font-family:inherit; }
+  /* 加减按钮：扁平中性灰，无彩色边框，靠明暗反馈 */
+  .btn3d{
+    position:absolute; border-radius:3px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:500; user-select:none;
+    color:#8b95a3; background:#1a2029; border:1px solid rgba(255,255,255,.06);
+    transition:background .1s, color .1s;
+  }
+  .btn3d:hover{ background:#232b36; color:#e6eaf0; }
+  .btn3d:active{ background:#151a22; }
+
+  .wavebox{ position:absolute; left:90px; top:25px; width:229px; height:126px;
+    background:#0a0d11; border:none; }
+  .wavebox .ch{ position:absolute; top:6px; font-size:9px; display:flex; align-items:center;
+    gap:4px; line-height:1; font-weight:500; padding:0; background:transparent; border-radius:0; }
+  .wavebox .ch i{ width:7px; height:7px; border-radius:2px; flex:none; }
+  .wavebox .ch1{ left:10px; color:#8b95a3; }
+  .wavebox .ch1 i{ background:#8a94a6; box-shadow:none; }
+  .wavebox .ch2{ left:68px; color:#8b95a3; }
+  .wavebox .ch2 i{ background:#4a9eff; box-shadow:none; }
+  .wavebox .div{ position:absolute; right:10px; top:7px; font-size:8.5px; color:#4a535f;
+    font-family:inherit; letter-spacing:.5px; }
+  #wave{ position:absolute; left:1px; top:1px; }
+  .wavebox .ch, .wavebox .div{ z-index:2; }
+
+  .robox{ position:absolute; left:90px; top:152px; width:229px; height:34px;
+    background:#0c0f14; border:none; border-top:1px solid rgba(255,255,255,.06); }
+  .robox .sep{ position:absolute; top:0; bottom:0; width:1px; background:rgba(255,255,255,.06); }
+  .robox .hsep{ display:none; }
+  .rocell{ position:absolute; top:5px; width:56px; font-size:8px; color:#5a6472;
+    text-align:center; letter-spacing:1.5px; font-weight:600; }
+  .roval{ position:absolute; top:18px; width:56px; font-size:12px; font-weight:600;
+    text-align:center; color:#e6eaf0; font-family:inherit; }
+
+  .bottombar{ position:absolute; left:0; top:186px; width:320px; height:54px;
+    background:#0f1318; border-top:1px solid rgba(255,255,255,.06); }
+  .bottombar .sep{ display:none; }
+  /* 底部按钮：主按钮实色填充，其余幽灵式 */
+  .btn-primary{ background:#1a5fb4 !important; color:#fff !important; border-color:transparent !important; }
+  .btn-primary:hover{ background:#2070d0 !important; }
+  .btn-danger{ background:transparent !important; color:#c97074 !important; border-color:rgba(229,72,77,.25) !important; }
+  .btn-danger:hover{ background:rgba(229,72,77,.12) !important; }
+  .btn-ghost{ background:transparent !important; color:#8b95a3 !important;
+    border-color:rgba(255,255,255,.1) !important; }
+  .btn-ghost:hover{ background:rgba(255,255,255,.05) !important; color:#e6eaf0 !important; }
+
+  /* ---- 信息面板 ---- */
+  .side{ flex:1 1 340px; min-width:300px; display:flex; flex-direction:column; gap:16px; }
+  .card{
+    background:linear-gradient(180deg, rgba(18,30,50,.85), rgba(13,22,40,.85));
+    border:1px solid var(--line);
+    border-radius:15px; padding:16px 18px;
+    box-shadow:0 10px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.04);
+    backdrop-filter:blur(4px);
+  }
+  .card h2{ display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600;
+    color:#cfe2fb; margin-bottom:13px; letter-spacing:.4px; }
+  .card h2 .ic{ width:24px; height:24px; border-radius:7px; flex:none;
+    background:linear-gradient(160deg, rgba(59,157,255,.25), rgba(11,61,145,.25));
+    border:1px solid var(--blue-soft); display:flex; align-items:center; justify-content:center; }
+  .card h2::after{ content:""; flex:1; height:1px;
+    background:linear-gradient(90deg, var(--line), transparent); }
+  table.mtr{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.mtr th, table.mtr td{ text-align:right; padding:6px 6px; white-space:nowrap; }
+  table.mtr th:first-child, table.mtr td:first-child{ text-align:left; color:var(--ink-2); }
+  table.mtr th{ color:var(--ink-3); font-weight:600; border-bottom:1px solid var(--line); font-size:11.5px; letter-spacing:.4px; }
+  table.mtr td{ color:var(--ink); border-bottom:1px solid var(--line-soft); }
+  table.mtr tr:last-child td{ border-bottom:none; }
+  table.mtr tbody tr:hover td{ background:rgba(59,157,255,.06); }
+  .m1col{ color:var(--green) !important; }
+  .m2col{ color:var(--cyan) !important; }
+  .badge{ display:inline-block; font-size:10.5px; padding:2px 8px; border-radius:10px; font-weight:600; }
+  .badge.run{ color:#06281a; background:var(--green); }
+  .badge.stop{ color:#3a2708; background:var(--yellow); }
+  .rule{ font-size:12.5px; color:var(--ink-2); line-height:1.95; }
+  .rule .eq{ color:var(--yellow); font-weight:600; }
+  .rule code{ color:var(--green); font-family:"Consolas",monospace; font-size:12px; }
+  .rule .line{ display:flex; gap:8px; }
+  .rule .line::before{ content:""; width:5px; height:5px; border-radius:50%; background:var(--blue); margin-top:9px; flex:none; }
+  ul.pins{ list-style:none; font-size:12.5px; color:var(--ink-2); line-height:1.7; }
+  ul.pins li{ display:flex; gap:9px; padding:4px 0; border-bottom:1px dashed var(--line-soft); }
+  ul.pins li:last-child{ border-bottom:none; }
+  ul.pins li::before{ content:""; width:6px; height:6px; border-radius:2px; background:var(--cyan); margin-top:7px; flex:none; }
+  ul.pins code{ color:var(--green); font-family:"Consolas",monospace; font-size:11.5px; }
+  .keys{ display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+  .key{ display:flex; align-items:center; gap:9px; font-size:12px; color:var(--ink-2);
+    background:var(--panel); border:1px solid var(--line-soft); border-radius:10px; padding:8px 10px; }
+  .key b{ color:var(--ink); font-weight:600; }
+  .key .kic{ width:26px; height:26px; border-radius:7px; flex:none; display:flex; align-items:center; justify-content:center;
+    background:rgba(59,157,255,.14); border:1px solid var(--blue-soft); }
+  .foot{ margin-top:2px; font-size:11.5px; color:var(--ink-3); line-height:1.85;
+    background:var(--panel); border:1px solid var(--line-soft); border-radius:12px; padding:12px 15px; }
+  .foot code{ color:var(--ink-2); font-family:"Consolas",monospace; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="masthead">
+    <div class="brand">
+      <div class="logo">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><rect x="2.5" y="5" width="19" height="14" rx="2.5" stroke="#dbeafe" stroke-width="1.7"/><path d="M4 13 L8 13 L10.5 9 L14 16 L16.5 11 L20 11" stroke="#fbbf24" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>
+      </div>
+      <div>
+        <h1>STM32F407 双电机 PID 调参屏</h1>
+        <div class="sub">Dual-Motor Closed-Loop Tuner · 实时仿真与固件 UI 一致</div>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill"><span class="dot"></span>L298N</span>
+      <span class="pill"><span class="dot"></span>FreeRTOS</span>
+      <span class="pill"><span class="dot"></span>SSD1963</span>
+      <span class="pill git"><span class="dot"></span>branch: UI</span>
+    </div>
+  </div>
+
+  <div class="layout">
+    <!-- ===== LCD 设备 ===== -->
+    <div class="device">
+      <div class="bezel">
+        <div class="lcd-stage" id="stage">
+          <div class="lcd" id="lcd">
+            <!-- 顶栏：Tab 式电机切换 -->
+            <div class="topbar">
+              <div class="menu"><i></i><i></i><i></i></div>
+              <span class="t">PID TUNER</span>
+              <div id="btn-m1" class="chtag sel" style="left:88px;">M1</div>
+              <div id="btn-m2" class="chtag" style="left:134px;">M2</div>
+              <div class="led" id="runled"></div>
+              <div class="ledtxt" id="runledtxt">STOP</div>
+            </div>
+            <!-- 左栏参数（90px 宽） -->
+            <div class="leftpanel">
+              <span class="lbl" style="top:3px;">TARGET</span>
+              <div id="val-0" class="val" style="top:17px;">50</div>
+              <span class="lbl" style="top:43px;">KP</span>
+              <div id="val-1" class="val" style="top:57px;">0.5</div>
+              <span class="lbl" style="top:83px;">KI</span>
+              <div id="val-2" class="val" style="top:97px;">0.10</div>
+              <span class="lbl" style="top:123px;">KD</span>
+              <div id="val-3" class="val" style="top:137px;">0.05</div>
+              <div id="dec-0" class="btn3d" style="left:2px;top:17px;width:22px;height:16px;">−</div>
+              <div id="inc-0" class="btn3d" style="left:66px;top:17px;width:22px;height:16px;">+</div>
+              <div id="dec-1" class="btn3d" style="left:2px;top:57px;width:22px;height:16px;">−</div>
+              <div id="inc-1" class="btn3d" style="left:66px;top:57px;width:22px;height:16px;">+</div>
+              <div id="dec-2" class="btn3d" style="left:2px;top:97px;width:22px;height:16px;">−</div>
+              <div id="inc-2" class="btn3d" style="left:66px;top:97px;width:22px;height:16px;">+</div>
+              <div id="dec-3" class="btn3d" style="left:2px;top:137px;width:22px;height:16px;">−</div>
+              <div id="inc-3" class="btn3d" style="left:66px;top:137px;width:22px;height:16px;">+</div>
+            </div>
+            <!-- 波形区 -->
+            <div class="wavebox">
+              <canvas id="wave" width="225" height="122"></canvas>
+              <span class="ch ch1"><i></i>Target</span>
+              <span class="ch ch2"><i></i>Actual</span>
+              <span class="div">1.00 s/div</span>
+            </div>
+            <!-- 读数行 -->
+            <div class="robox">
+              <div class="sep" style="left:57px;"></div><div class="sep" style="left:114px;"></div><div class="sep" style="left:171px;"></div>
+              <div class="hsep" style="top:13px;"></div>
+              <div class="rocell" style="left:0;">RPM</div>
+              <div class="rocell" style="left:57px;">PWM</div>
+              <div class="rocell" style="left:114px;">OVS</div>
+              <div class="rocell" style="left:171px;">ERR</div>
+              <div id="ro-rpm" class="roval" style="left:0;">0.0</div>
+              <div id="ro-pwm" class="roval" style="left:57px;">0</div>
+              <div id="ro-ovs" class="roval" style="left:114px;color:#c97074;">--</div>
+              <div id="ro-err" class="roval" style="left:171px;">0.0</div>
+            </div>
+            <!-- 底栏：主按钮实色 + 幽灵按钮 -->
+            <div class="bottombar">
+              <div id="btn-start" class="btn3d btn-primary" style="left:8px;top:7px;width:72px;height:40px;font-size:13px;letter-spacing:1px;">START</div>
+              <div id="btn-stop" class="btn3d btn-danger" style="left:88px;top:7px;width:72px;height:40px;font-size:13px;letter-spacing:1px;">STOP</div>
+              <div id="btn-step" class="btn3d btn-ghost" style="left:168px;top:7px;width:72px;height:40px;font-size:13px;letter-spacing:1px;">STEP</div>
+              <div id="btn-reset" class="btn3d btn-ghost" style="left:248px;top:7px;width:64px;height:40px;font-size:13px;letter-spacing:1px;">RESET</div>
+            </div>
+          </div>
+        </div>
+        <div class="bezel-foot">
+          <span class="pwr"></span>
+          <span class="cap">320 × 240 · <b>触摸按钮可点击</b> · 点击 M1 / M2 切换电机</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 信息面板 ===== -->
+    <div class="side">
+      <div class="card">
+        <h2><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 12h4l2-7 4 14 2-7h6" stroke="#3b9dff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>双电机实时状态（mtr[2]）</h2>
+        <table class="mtr" id="mtrTable">
+          <tr><th>参数</th><th>M1</th><th>M2</th></tr>
+          <tr><td>Target</td><td class="m1col" id="t-0">50</td><td class="m2col" id="t-1">50</td></tr>
+          <tr><td>Kp</td><td class="m1col" id="k-0">0.5</td><td class="m2col" id="k-1">0.5</td></tr>
+          <tr><td>Ki</td><td class="m1col" id="i-0">0.10</td><td class="m2col" id="i-1">0.10</td></tr>
+          <tr><td>Kd</td><td class="m1col" id="d-0">0.05</td><td class="m2col" id="d-1">0.05</td></tr>
+          <tr><td>Actual rpm</td><td class="m1col" id="a-0">0.0</td><td class="m2col" id="a-1">0.0</td></tr>
+          <tr><td>PWM %</td><td class="m1col" id="p-0">0</td><td class="m2col" id="p-1">0</td></tr>
+          <tr><td>Overshoot</td><td class="m1col" id="o-0">--</td><td class="m2col" id="o-1">--</td></tr>
+          <tr><td>状态</td><td class="m1col" id="s-0"><span class="badge stop">STOP</span></td><td class="m2col" id="s-1"><span class="badge stop">STOP</span></td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h2><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 4v16M5 12h14M19 8l-4 4 4 4" stroke="#3b9dff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>PID 控制律（取自 main.c）</h2>
+        <div class="rule">
+          <div class="line"><span><span class="eq">u = Kp·e + Ki·∫e·dt + Kd·(de/dt)</span></span></div>
+          <div class="line"><span>采样周期 <code>dt = 100ms</code>；转速低通滤波 <code>0.7·旧 + 0.3·新</code></span></div>
+          <div class="line"><span>积分限幅 <code>∫e ∈ [-50, 50]</code> · 输出限幅 <code>u ∈ [-100, 100]%</code></span></div>
+          <div class="line"><span>编码器分辨率 <code>11线 × 4倍频 × 30减速 = 1320 脉冲/转</code></span></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="6" y="3" width="12" height="18" rx="2" stroke="#3b9dff" stroke-width="2"/><path d="M10 7h4M10 11h4" stroke="#3b9dff" stroke-width="2" stroke-linecap="round"/></svg></span>引脚映射（motor.h / encoder.h）</h2>
+        <ul class="pins">
+          <li><span>M1 方向 <code>IN1=PA2 · IN2=PA3</code>　PWM <code>ENA=PB0 (TIM3_CH3)</code></span></li>
+          <li><span>M2 方向 <code>IN1=PA6 · IN2=PA7</code>　PWM <code>ENB=PC6 (TIM8_CH1)</code></span></li>
+          <li><span>编码器 M1 <code>A=PA0 B=PA1 (TIM2)</code></span></li>
+          <li><span>编码器 M2 <code>A=PB6 B=PB7 (TIM4)</code></span></li>
+          <li><span>触摸 <code>XPT2046</code> · 屏 <code>SSD1963 via FSMC</code></span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="#3b9dff" stroke-width="2"/><path d="M12 8v4l3 2" stroke="#3b9dff" stroke-width="2" stroke-linecap="round"/></svg></span>按键行为</h2>
+        <div class="keys">
+          <div class="key"><span class="kic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="#22d3ee" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/></svg></span><span><b>Target</b> ±10（0~250）</span></div>
+          <div class="key"><span class="kic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="#22d3ee" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/></svg></span><span><b>Kp</b> ±0.1</span></div>
+          <div class="key"><span class="kic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="#22d3ee" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/></svg></span><span><b>Ki / Kd</b> ±0.05</span></div>
+          <div class="key"><span class="kic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="#f87171" stroke-width="2" stroke-linecap="round"/></svg></span><span><b>START / STOP</b> 启停</span></div>
+          <div class="key"><span class="kic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12h12M12 6l6 6-6 6" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span><b>STEP</b> 100↔200 阶跃</span></div>
+          <div class="key"><span class="kic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span><b>RESET</b> 恢复默认</span></div>
+        </div>
+      </div>
+      <div class="foot">
+        本页为 <code>Core/Src/pid_screen.c</code> 的 1:1 交互仿真：布局坐标、配色、按钮逻辑、PID 算式、波形（100 点 × 100ms = 10s 窗口，Y 轴 -50~250 rpm）均与固件一致。电机为一级惯性模型（含编码器噪声），用于可视化闭环响应。
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===================== 状态（对应 pid_screen.c / main.c） ===================== */
+const DT = 0.1;                 // 采样 100ms
+const MOTOR_GAIN = 2.2;         // rpm / %PWM（一级惯性稳态增益）
+const TAU = 0.35;               // 电机时间常数 s
+const NOISE = 3.0;              // 编码器噪声 ±rpm
+
+const mtr = [
+  { kp:0.5, ki:0.10, kd:0.05, target:50, actual:0, pwm:0, overshoot:0, peak:0, armed:false },
+  { kp:0.5, ki:0.10, kd:0.05, target:50, actual:0, pwm:0, overshoot:0, peak:0, armed:false }
+];
+const pid = [
+  { integral:0, lastErr:0, filt:0 },
+  { integral:0, lastErr:0, filt:0 }
+];
+const plant = [ { rpm:0 }, { rpm:0 } ];
+const running = [ false, false ];
+let cur = 0;
+
+/* 波形缓冲：100 点 × 100ms = 10s */
+const WAVE_POINTS = 100;
+const waveT = [new Array(WAVE_POINTS).fill(0), new Array(WAVE_POINTS).fill(0)];
+const waveA = [new Array(WAVE_POINTS).fill(0), new Array(WAVE_POINTS).fill(0)];
+let waveIdx = [0, 0];
+
+/* ===================== PID 闭环（对应 PID_Task，每 100ms） ===================== */
+function pidTick() {
+  for (let i = 0; i < 2; i++) {
+    if (!running[i]) {
+      plant[i].rpm = 0; pid[i].integral = 0; pid[i].lastErr = 0; pid[i].filt = 0;
+      mtr[i].pwm = 0; mtr[i].actual = 0; mtr[i].overshoot = 0; mtr[i].armed = false;
+      continue;
+    }
+    /* 电机一级惯性模型 + 编码器噪声 */
+    plant[i].rpm += ((MOTOR_GAIN * mtr[i].pwm - plant[i].rpm) / TAU) * DT;
+    const raw = plant[i].rpm + (Math.random() - 0.5) * NOISE;
+    pid[i].filt = pid[i].filt * 0.7 + raw * 0.3;          // 低通滤波
+    const actual = pid[i].filt;
+
+    const target = mtr[i].target, kp = mtr[i].kp, ki = mtr[i].ki, kd = mtr[i].kd;
+    const err = target - actual;
+    pid[i].integral += err * DT;
+    if (pid[i].integral > 50) pid[i].integral = 50;        // 积分限幅
+    if (pid[i].integral < -50) pid[i].integral = -50;
+    const deriv = (err - pid[i].lastErr) / DT;
+    pid[i].lastErr = err;
+    let pwm = kp * err + ki * pid[i].integral + kd * deriv;
+    if (pwm > 100) pwm = 100;                              // 输出限幅
+    if (pwm < -100) pwm = -100;
+
+    mtr[i].pwm = pwm; mtr[i].actual = actual;
+
+    /* 超调量统计 */
+    if (mtr[i].armed) {
+      if (actual > mtr[i].peak) mtr[i].peak = actual;
+      if (mtr[i].target > 1) {
+        mtr[i].overshoot = (mtr[i].peak - mtr[i].target) / mtr[i].target * 100;
+        if (mtr[i].overshoot < 0) mtr[i].overshoot = 0;
+      }
+    }
+  }
+}
+
+/* ===================== 绘制 ===================== */
+const $ = id => document.getElementById(id);
+const canvas = $('wave');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+function rpmToY(v) {
+  if (v < -50) v = -50; if (v > 250) v = 250;
+  return H - 1 - ((v + 50) / 300) * (H - 2);
+}
+
+function drawWave(m) {
+  /* 背景 */
+  ctx.fillStyle = '#0a0d11'; ctx.fillRect(0, 0, W, H);
+
+  /* === 网格：极淡中性灰，仅大格可见、小格隐约 === */
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(255,255,255,.03)';
+  for (let g = -50; g <= 250; g += 10) { if (g % 50 === 0) continue;
+    const y = Math.round(rpmToY(g)) + .5;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  for (let s = 0; s <= 10; s += 0.2) { if (s % 1 === 0) continue;
+    const x = Math.round(s / 10 * W) + .5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(255,255,255,.07)';
+  for (let g = -50; g <= 250; g += 50) {
+    const y = Math.round(rpmToY(g)) + .5;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  for (let s = 0; s <= 10; s += 1) {
+    const x = Math.round(s / 10 * W) + .5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+
+  const T = waveT[m], A = waveA[m], idx = waveIdx[m];
+  /* 干净线条，无辉光：目标为中性灰蓝虚线感，实际为品牌蓝 */
+  const line = (arr, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    for (let i = 0; i < WAVE_POINTS - 1; i++) {
+      const i1 = (idx + i) % WAVE_POINTS, i2 = (idx + i + 1) % WAVE_POINTS;
+      const x1 = i / (WAVE_POINTS - 1) * W, x2 = (i + 1) / (WAVE_POINTS - 1) * W;
+      ctx.moveTo(x1, rpmToY(arr[i1])); ctx.lineTo(x2, rpmToY(arr[i2]));
+    }
+    ctx.stroke();
+  };
+  line(T, '#6b7684', 1.2);   // 目标：灰蓝细线
+  line(A, '#4a9eff', 1.6);   // 实际：品牌蓝
+}
+
+function fmtOvershoot(i) {
+  if (mtr[i].target > 1) return mtr[i].overshoot.toFixed(1) + '%';
+  return '--';
+}
+
+function drawParams(m) {
+  $('val-0').textContent = mtr[m].target.toFixed(0);
+  $('val-1').textContent = mtr[m].kp.toFixed(1);
+  $('val-2').textContent = mtr[m].ki.toFixed(2);
+  $('val-3').textContent = mtr[m].kd.toFixed(2);
+}
+
+function drawRunStatus(m) {
+  const on = running[m];
+  $('runled').classList.toggle('on', on);
+  $('runledtxt').textContent = on ? 'RUN' : 'STOP';
+  $('runledtxt').classList.toggle('on', on);
+}
+
+function drawTabs() {
+  const m1 = $('btn-m1'), m2 = $('btn-m2');
+  m1.classList.toggle('sel', cur === 0);
+  m2.classList.toggle('sel', cur === 1);
+}
+
+function drawReadout(m) {
+  $('ro-rpm').textContent = mtr[m].actual.toFixed(1);
+  $('ro-pwm').textContent = Math.round(mtr[m].pwm);
+  $('ro-ovs').textContent = fmtOvershoot(m);
+  $('ro-err').textContent = (mtr[m].target - mtr[m].actual).toFixed(1);
+}
+
+function refreshTable() {
+  for (let i = 0; i < 2; i++) {
+    $('t-' + i).textContent = mtr[i].target.toFixed(0);
+    $('k-' + i).textContent = mtr[i].kp.toFixed(1);
+    $('i-' + i).textContent = mtr[i].ki.toFixed(2);
+    $('d-' + i).textContent = mtr[i].kd.toFixed(2);
+    $('a-' + i).textContent = mtr[i].actual.toFixed(1);
+    $('p-' + i).textContent = Math.round(mtr[i].pwm);
+    $('o-' + i).textContent = fmtOvershoot(i);
+    const cell = $('s-' + i);
+    cell.innerHTML = running[i] ? '<span class="badge run">RUN</span>' : '<span class="badge stop">STOP</span>';
+  }
+}
+
+/* ===================== 触摸处理（对应 tp_handle） ===================== */
+function switchMotor(m) {
+  cur = m; drawTabs(); drawParams(m); drawRunStatus(m);
+  waveIdx[m] = 0;
+  for (let i = 0; i < WAVE_POINTS; i++) { waveT[m][i] = mtr[m].target; waveA[m][i] = mtr[m].actual; }
+  drawWave(m);
+}
+
+const params = {
+  dec: [[0, -10], [1, -0.1], [2, -0.05], [3, -0.05]],
+  inc: [[0, +10], [1, +0.1], [2, +0.05], [3, +0.05]]
+};
+function clampParam(idx, v) {
+  if (idx === 0) { v = Math.max(0, Math.min(250, v)); }
+  else if (idx === 1) { v = Math.max(0, v); }
+  else { v = Math.max(0, v); }
+  return v;
+}
+
+function wire() {
+  for (let idx = 0; idx < 4; idx++) {
+    const stepDec = params.dec[idx][1], stepInc = params.inc[idx][1];
+    const setKey = ['target', 'kp', 'ki', 'kd'][idx];
+    $('dec-' + idx).addEventListener('click', e => { e.preventDefault();
+      mtr[cur][setKey] = clampParam(idx, mtr[cur][setKey] + stepDec); drawParams(cur); refreshTable(); debounce(); });
+    $('inc-' + idx).addEventListener('click', e => { e.preventDefault();
+      mtr[cur][setKey] = clampParam(idx, mtr[cur][setKey] + stepInc); drawParams(cur); refreshTable(); debounce(); });
+  }
+  $('btn-m1').addEventListener('click', e => { e.preventDefault(); switchMotor(0); debounce(); });
+  $('btn-m2').addEventListener('click', e => { e.preventDefault(); switchMotor(1); debounce(); });
+  $('btn-start').addEventListener('click', e => { e.preventDefault(); running[cur] = 1; drawRunStatus(cur); refreshTable(); debounce(); });
+  $('btn-stop').addEventListener('click', e => { e.preventDefault(); running[cur] = 0; mtr[cur].pwm = 0; drawRunStatus(cur); refreshTable(); debounce(); });
+  $('btn-step').addEventListener('click', e => { e.preventDefault();
+    mtr[cur].target = mtr[cur].target < 150 ? 200 : 100;
+    mtr[cur].peak = mtr[cur].actual; mtr[cur].overshoot = 0; mtr[cur].armed = 1;
+    drawParams(cur); refreshTable(); debounce(); });
+  $('btn-reset').addEventListener('click', e => { e.preventDefault();
+    mtr[cur].kp = 2.0; mtr[cur].ki = 0.50; mtr[cur].kd = 0.20;
+    drawParams(cur); refreshTable(); debounce(); });
+}
+let lock = 0;
+function debounce() { if (lock) return; lock = 1; setTimeout(() => lock = 0, 150); }  // 去抖 150ms
+
+/* ===================== 主循环（波形 100ms / 读数 200ms） ===================== */
+setInterval(() => {
+  pidTick();
+  const m = cur;
+  waveT[m][waveIdx[m]] = mtr[m].target;
+  waveA[m][waveIdx[m]] = mtr[m].actual;
+  waveIdx[m] = (waveIdx[m] + 1) % WAVE_POINTS;
+  drawWave(m);
+  refreshTable();
+}, 100);
+
+setInterval(() => { drawReadout(cur); }, 200);
+
+/* ===================== LCD 自适应缩放 ===================== */
+const stage = $('stage'), lcd = $('lcd');
+function fit() {
+  const bezel = stage.parentElement;
+  const cs = getComputedStyle(bezel);
+  const avail = bezel.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const s = Math.min(avail / 320, 1.9);
+  stage.style.width = (320 * s) + 'px';
+  stage.style.height = (240 * s) + 'px';
+  lcd.style.transform = 'scale(' + s + ')';
+}
+window.addEventListener('resize', fit);
+
+/* 初始化 */
+function init() {
+  for (let m = 0; m < 2; m++) {
+    for (let i = 0; i < WAVE_POINTS; i++) { waveT[m][i] = mtr[m].target; waveA[m][i] = mtr[m].actual; }
+  }
+  drawTabs(); drawParams(0); drawRunStatus(0); drawWave(0); refreshTable();
+  wire(); fit();
+}
+init();
+</script>
+</body>
+</html>

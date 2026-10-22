@@ -1,0 +1,90 @@
+{
+  "src": "D:\\stm32_project\\PID\\STM32F407CtrE\\PID_Tuner_UI.html",
+  "url": "file:///D:/stm32_project/PID/STM32F407CtrE/PID_Tuner_UI.html",
+  "outdir": "D:\\stm32_project\\PID\\STM32F407CtrE\\_shots",
+  "include": [
+    "lint",
+    "screenshots",
+    "structure"
+  ],
+  "shots": {
+    "desktop": {
+      "screenshot": "D:\\stm32_project\\PID\\STM32F407CtrE\\_shots\\PID_Tuner_UI_desktop.jpg",
+      "screenshotBytes": 70998,
+      "truncated": false,
+      "structure": {
+        "title": "STM32F407 PID 调参屏 · 与 pid_screen.c 一致",
+        "firstH1": "STM32F407 双电机 PID 调参屏",
+        "viewport": {
+          "w": 1424,
+          "h": 752
+        },
+        "fullpage": {
+          "w": 1424,
+          "h": 1250
+        },
+        "counts": {
+          "section": 0,
+          "h1": 1,
+          "h2": 4,
+          "img": 0,
+          "canvas": 1,
+          "svg": 11,
+          "links": 0,
+          "buttons": 0
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": [],
+      "reportSource": "cdp"
+    }
+  },
+  "engine": "chrome_cli",
+  "chromiumExec": "C:\\Users\\zqt31/AppData/Local/ms-playwright\\chromium-1140\\chrome-win\\chrome.exe",
+  "engineDegraded": true,
+  "engineDegradedReason": "playwright 未装",
+  "elapsedSec": 4.7,
+  "schemaVersion": 2,
+  "status": "pass",
+  "engineInfo": {
+    "name": "chrome_cli",
+    "degraded": true,
+    "degradedReasons": [
+      "playwright 未装"
+    ]
+  },
+  "input": {
+    "original": "D:\\stm32_project\\PID\\STM32F407CtrE\\PID_Tuner_UI.html",
+    "resolvedPath": "D:\\stm32_project\\PID\\STM32F407CtrE\\PID_Tuner_UI.html",
+    "baseUrl": "file:///D:/stm32_project/PID/STM32F407CtrE/PID_Tuner_UI.html",
+    "protocol": "file",
+    "cwd": "D:\\stm32_project\\PID\\STM32F407CtrE",
+    "mediaMode": {
+      "reducedMotion": true
+    }
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "viewport": "desktop",
+        "path": "D:\\stm32_project\\PID\\STM32F407CtrE\\_shots\\PID_Tuner_UI_desktop.jpg",
+        "size": 70998,
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      }
+    ]
+  },
+  "summary": {
+    "blocker": 0,
+    "error": 0,
+    "warning": 0,
+    "info": 0
+  },
+  "findings": [],
+  "prioritizedActions": [],
+  "reportPath": "D:\\stm32_project\\PID\\STM32F407CtrE\\_shots\\report.json"
+}
