@@ -81,41 +81,78 @@
   .bezel-foot .cap{ font-size:11.5px; color:#93a3b8; }
   .bezel-foot .cap b{ color:#cfe0f5; font-weight:600; }
 
-  /* ---- 屏幕内元素（坐标取自 pid_screen.c，配色与固件一致） ---- */
-  .topbar{ position:absolute; left:0; top:0; width:320px; height:24px; background:#104141; }
-  .topbar .t{ position:absolute; left:4px; top:4px; font-size:12px; color:#00ffff; }
-  .led{ position:absolute; left:256px; top:8px; width:9px; height:9px; border-radius:50%; background:#808080; }
-  .led.on{ background:#00ff00; box-shadow:0 0 7px #00ff00, 0 0 2px #00ff00; }
-  .ledtxt{ position:absolute; left:269px; top:4px; font-size:12px; color:#808080; }
-  .ledtxt.on{ color:#00ff00; }
-  .leftpanel{ position:absolute; left:0; top:24px; width:120px; height:162px; background:#000; border:1px solid #105531; border-left:none; }
-  .lbl{ position:absolute; left:6px; font-size:12px; color:#9aa5ad; }
-  .val{ position:absolute; left:34px; font-size:16px; font-weight:700; }
+  /* ---- 屏幕内元素：简约高端仪器风（深色中性 + 单一强调色） ---- */
+  .topbar{ position:absolute; left:0; top:0; width:320px; height:24px;
+    background:#0f1318; border-bottom:1px solid rgba(255,255,255,.06); }
+  .topbar .menu{ display:none; }
+  .topbar .t{ position:absolute; left:10px; top:6px; font-size:9px; color:#5a6472;
+    letter-spacing:2px; font-weight:600; }
+  /* Tab：选中态仅靠文字亮度 + 底部 2px 细线，无彩色块 */
+  .chtag{ position:absolute; top:0; height:24px; padding:0 12px;
+    font-size:11px; font-weight:600; display:flex; align-items:center;
+    color:#5a6472; background:transparent; box-shadow:none; cursor:pointer; border-radius:0; }
+  .chtag small{ display:none; }
+  .chtag.sel{ color:#e6eaf0; }
+  .chtag.sel::after{ content:""; position:absolute; left:8px; right:8px; bottom:0; height:2px;
+    background:#4a9eff; border-radius:1px; }
+  .led{ position:absolute; right:6px; top:9px; width:6px; height:6px; border-radius:50%;
+    background:#3a414c; }
+  .led.on{ background:#4a9eff; box-shadow:none; }
+  .ledtxt{ position:absolute; right:16px; top:6px; font-size:9px; color:#5a6472;
+    font-weight:600; letter-spacing:1.5px; }
+  .ledtxt.on{ color:#8fb8ec; }
+
+  .leftpanel{ position:absolute; left:0; top:24px; width:90px; height:162px;
+    background:#0c0f14; border-right:1px solid rgba(255,255,255,.06); }
+  .lbl{ position:absolute; left:10px; font-size:8.5px; color:#5a6472;
+    letter-spacing:1.5px; font-weight:600; }
+  .val{ position:absolute; left:26px; width:38px; font-size:15px; font-weight:600;
+    text-align:center; color:#e6eaf0; line-height:16px; font-family:inherit; }
+  /* 加减按钮：扁平中性灰，无彩色边框，靠明暗反馈 */
   .btn3d{
-    position:absolute; border-radius:4px; cursor:pointer;
-    box-shadow: inset 1px 1px 0 rgba(255,255,255,.85), inset -1px -1px 0 rgba(0,0,0,.9);
+    position:absolute; border-radius:3px; cursor:pointer;
     display:flex; align-items:center; justify-content:center;
-    font-size:12px; font-weight:700; user-select:none;
+    font-size:12px; font-weight:500; user-select:none;
+    color:#8b95a3; background:#1a2029; border:1px solid rgba(255,255,255,.06);
+    transition:background .1s, color .1s;
   }
-  .btn3d:hover{ filter:brightness(1.18); }
-  .btn3d:active{ filter:brightness(1.4); }
-  .wavebox{ position:absolute; left:120px; top:25px; width:199px; height:117px; border:1px solid #105531; }
-  .wavebox .ch{ position:absolute; top:2px; font-size:10px; display:flex; align-items:center; gap:4px; padding:1px 5px; border-radius:3px; line-height:1; }
-  .wavebox .ch i{ width:9px; height:9px; border-radius:1px; flex:none; }
-  .wavebox .ch1{ left:4px; color:#ffd34d; background:rgba(24,18,0,.55); }
-  .wavebox .ch1 i{ background:#ffd34d; box-shadow:0 0 4px #ffb300; }
-  .wavebox .ch2{ left:50px; color:#39ff8b; background:rgba(0,22,12,.55); }
-  .wavebox .ch2 i{ background:#39ff8b; box-shadow:0 0 4px #00ff66; }
-  .wavebox .div{ position:absolute; right:4px; top:3px; font-size:9.5px; color:#7f9aa0; }
+  .btn3d:hover{ background:#232b36; color:#e6eaf0; }
+  .btn3d:active{ background:#151a22; }
+
+  .wavebox{ position:absolute; left:90px; top:25px; width:229px; height:126px;
+    background:#0a0d11; border:none; }
+  .wavebox .ch{ position:absolute; top:6px; font-size:9px; display:flex; align-items:center;
+    gap:4px; line-height:1; font-weight:500; padding:0; background:transparent; border-radius:0; }
+  .wavebox .ch i{ width:7px; height:7px; border-radius:2px; flex:none; }
+  .wavebox .ch1{ left:10px; color:#8b95a3; }
+  .wavebox .ch1 i{ background:#8a94a6; box-shadow:none; }
+  .wavebox .ch2{ left:68px; color:#8b95a3; }
+  .wavebox .ch2 i{ background:#4a9eff; box-shadow:none; }
+  .wavebox .div{ position:absolute; right:10px; top:7px; font-size:8.5px; color:#4a535f;
+    font-family:inherit; letter-spacing:.5px; }
   #wave{ position:absolute; left:1px; top:1px; }
   .wavebox .ch, .wavebox .div{ z-index:2; }
-  .robox{ position:absolute; left:120px; top:145px; width:199px; height:40px; border:1px solid #105531; background:#020806; }
-  .robox .sep{ position:absolute; top:0; bottom:0; width:1px; background:#105531; }
-  .robox .hsep{ position:absolute; left:0; right:0; height:1px; background:#105531; }
-  .rocell{ position:absolute; top:3px; width:49px; font-size:10.5px; color:#7f8c86; text-align:center; letter-spacing:.4px; }
-  .roval{ position:absolute; top:19px; width:49px; font-size:13px; font-weight:700; text-align:center; }
-  .bottombar{ position:absolute; left:0; top:186px; width:320px; height:54px; background:#104141; border-top:1px solid #105531; }
-  .bottombar .sep{ position:absolute; top:0; bottom:0; width:1px; background:#105531; }
+
+  .robox{ position:absolute; left:90px; top:152px; width:229px; height:34px;
+    background:#0c0f14; border:none; border-top:1px solid rgba(255,255,255,.06); }
+  .robox .sep{ position:absolute; top:0; bottom:0; width:1px; background:rgba(255,255,255,.06); }
+  .robox .hsep{ display:none; }
+  .rocell{ position:absolute; top:5px; width:56px; font-size:8px; color:#5a6472;
+    text-align:center; letter-spacing:1.5px; font-weight:600; }
+  .roval{ position:absolute; top:18px; width:56px; font-size:12px; font-weight:600;
+    text-align:center; color:#e6eaf0; font-family:inherit; }
+
+  .bottombar{ position:absolute; left:0; top:186px; width:320px; height:54px;
+    background:#0f1318; border-top:1px solid rgba(255,255,255,.06); }
+  .bottombar .sep{ display:none; }
+  /* 底部按钮：主按钮实色填充，其余幽灵式 */
+  .btn-primary{ background:#1a5fb4 !important; color:#fff !important; border-color:transparent !important; }
+  .btn-primary:hover{ background:#2070d0 !important; }
+  .btn-danger{ background:transparent !important; color:#c97074 !important; border-color:rgba(229,72,77,.25) !important; }
+  .btn-danger:hover{ background:rgba(229,72,77,.12) !important; }
+  .btn-ghost{ background:transparent !important; color:#8b95a3 !important;
+    border-color:rgba(255,255,255,.1) !important; }
+  .btn-ghost:hover{ background:rgba(255,255,255,.05) !important; color:#e6eaf0 !important; }
 
   /* ---- 信息面板 ---- */
   .side{ flex:1 1 340px; min-width:300px; display:flex; flex-direction:column; gap:16px; }
@@ -192,60 +229,60 @@
       <div class="bezel">
         <div class="lcd-stage" id="stage">
           <div class="lcd" id="lcd">
-            <!-- 顶栏 -->
+            <!-- 顶栏：Tab 式电机切换 -->
             <div class="topbar">
-              <span class="t">PID Tuner</span>
-              <div id="btn-m1" class="btn3d" style="left:110px;top:3px;width:31px;height:18px;background:#0d6a2a;color:#00ff00;border:1px solid #00ff00;">M1</div>
-              <div id="btn-m2" class="btn3d" style="left:145px;top:3px;width:31px;height:18px;background:#104141;color:#9aa5ad;border:1px solid #9aa5ad;">M2</div>
+              <div class="menu"><i></i><i></i><i></i></div>
+              <span class="t">PID TUNER</span>
+              <div id="btn-m1" class="chtag sel" style="left:88px;">M1</div>
+              <div id="btn-m2" class="chtag" style="left:134px;">M2</div>
               <div class="led" id="runled"></div>
               <div class="ledtxt" id="runledtxt">STOP</div>
             </div>
-            <!-- 左栏参数 -->
+            <!-- 左栏参数（90px 宽） -->
             <div class="leftpanel">
-              <span class="lbl" style="top:4px;">Target</span>
-              <div id="val-0" class="val" style="top:24px;color:#ffff00;">50</div>
-              <span class="lbl" style="top:42px;">Kp</span>
-              <div id="val-1" class="val" style="top:62px;color:#00ff00;">0.5</div>
-              <span class="lbl" style="top:80px;">Ki</span>
-              <div id="val-2" class="val" style="top:100px;color:#00ffff;">0.10</div>
-              <span class="lbl" style="top:118px;">Kd</span>
-              <div id="val-3" class="val" style="top:138px;color:#ff00ff;">0.05</div>
-              <div id="dec-0" class="btn3d" style="left:4px;top:22px;width:23px;height:19px;background:#5a1430;color:#ff0000;border:1px solid #ff0000;">-</div>
-              <div id="dec-1" class="btn3d" style="left:4px;top:60px;width:23px;height:19px;background:#5a1430;color:#ff0000;border:1px solid #ff0000;">-</div>
-              <div id="dec-2" class="btn3d" style="left:4px;top:98px;width:23px;height:19px;background:#5a1430;color:#ff0000;border:1px solid #ff0000;">-</div>
-              <div id="dec-3" class="btn3d" style="left:4px;top:136px;width:23px;height:19px;background:#5a1430;color:#ff0000;border:1px solid #ff0000;">-</div>
-              <div id="inc-0" class="btn3d" style="left:94px;top:22px;width:23px;height:19px;background:#0a5a2a;color:#00ff00;border:1px solid #00ff00;">+</div>
-              <div id="inc-1" class="btn3d" style="left:94px;top:60px;width:23px;height:19px;background:#0a5a2a;color:#00ff00;border:1px solid #00ff00;">+</div>
-              <div id="inc-2" class="btn3d" style="left:94px;top:98px;width:23px;height:19px;background:#0a5a2a;color:#00ff00;border:1px solid #00ff00;">+</div>
-              <div id="inc-3" class="btn3d" style="left:94px;top:136px;width:23px;height:19px;background:#0a5a2a;color:#00ff00;border:1px solid #00ff00;">+</div>
+              <span class="lbl" style="top:3px;">TARGET</span>
+              <div id="val-0" class="val" style="top:17px;">50</div>
+              <span class="lbl" style="top:43px;">KP</span>
+              <div id="val-1" class="val" style="top:57px;">0.5</div>
+              <span class="lbl" style="top:83px;">KI</span>
+              <div id="val-2" class="val" style="top:97px;">0.10</div>
+              <span class="lbl" style="top:123px;">KD</span>
+              <div id="val-3" class="val" style="top:137px;">0.05</div>
+              <div id="dec-0" class="btn3d" style="left:2px;top:17px;width:22px;height:16px;">−</div>
+              <div id="inc-0" class="btn3d" style="left:66px;top:17px;width:22px;height:16px;">+</div>
+              <div id="dec-1" class="btn3d" style="left:2px;top:57px;width:22px;height:16px;">−</div>
+              <div id="inc-1" class="btn3d" style="left:66px;top:57px;width:22px;height:16px;">+</div>
+              <div id="dec-2" class="btn3d" style="left:2px;top:97px;width:22px;height:16px;">−</div>
+              <div id="inc-2" class="btn3d" style="left:66px;top:97px;width:22px;height:16px;">+</div>
+              <div id="dec-3" class="btn3d" style="left:2px;top:137px;width:22px;height:16px;">−</div>
+              <div id="inc-3" class="btn3d" style="left:66px;top:137px;width:22px;height:16px;">+</div>
             </div>
             <!-- 波形区 -->
             <div class="wavebox">
-              <canvas id="wave" width="195" height="113"></canvas>
+              <canvas id="wave" width="225" height="122"></canvas>
               <span class="ch ch1"><i></i>Target</span>
               <span class="ch ch2"><i></i>Actual</span>
-              <span class="div">1 s/div</span>
+              <span class="div">1.00 s/div</span>
             </div>
             <!-- 读数行 -->
             <div class="robox">
-              <div class="sep" style="left:50px;"></div><div class="sep" style="left:99px;"></div><div class="sep" style="left:149px;"></div>
-              <div class="hsep" style="top:15px;"></div>
+              <div class="sep" style="left:57px;"></div><div class="sep" style="left:114px;"></div><div class="sep" style="left:171px;"></div>
+              <div class="hsep" style="top:13px;"></div>
               <div class="rocell" style="left:0;">RPM</div>
-              <div class="rocell" style="left:50px;">PWM%</div>
-              <div class="rocell" style="left:100px;">OVS%</div>
-              <div class="rocell" style="left:150px;">ERR</div>
-              <div id="ro-rpm" class="roval" style="left:0;color:#00ff00;">0.0</div>
-              <div id="ro-pwm" class="roval" style="left:50px;color:#ffff00;">0</div>
-              <div id="ro-ovs" class="roval" style="left:100px;color:#ff0000;">--</div>
-              <div id="ro-err" class="roval" style="left:150px;color:#ffff00;">0.0</div>
+              <div class="rocell" style="left:57px;">PWM</div>
+              <div class="rocell" style="left:114px;">OVS</div>
+              <div class="rocell" style="left:171px;">ERR</div>
+              <div id="ro-rpm" class="roval" style="left:0;">0.0</div>
+              <div id="ro-pwm" class="roval" style="left:57px;">0</div>
+              <div id="ro-ovs" class="roval" style="left:114px;color:#c97074;">--</div>
+              <div id="ro-err" class="roval" style="left:171px;">0.0</div>
             </div>
-            <!-- 底栏 -->
+            <!-- 底栏：主按钮实色 + 幽灵按钮 -->
             <div class="bottombar">
-              <div class="sep" style="left:80px;"></div><div class="sep" style="left:160px;"></div><div class="sep" style="left:240px;"></div>
-              <div id="btn-start" class="btn3d" style="left:0px;top:5px;width:80px;height:44px;background:#0a5a2a;color:#00ff00;border:1px solid #00ff00;font-size:16px;">START</div>
-              <div id="btn-stop" class="btn3d" style="left:80px;top:5px;width:80px;height:44px;background:#5a1430;color:#ff0000;border:1px solid #ff0000;font-size:16px;">STOP</div>
-              <div id="btn-step" class="btn3d" style="left:160px;top:5px;width:80px;height:44px;background:#0d6a2a;color:#00ffff;border:1px solid #00ffff;font-size:16px;">STEP</div>
-              <div id="btn-reset" class="btn3d" style="left:240px;top:5px;width:80px;height:44px;background:#2a4a3a;color:#ffff00;border:1px solid #ffff00;font-size:16px;">RESET</div>
+              <div id="btn-start" class="btn3d btn-primary" style="left:8px;top:7px;width:72px;height:40px;font-size:13px;letter-spacing:1px;">START</div>
+              <div id="btn-stop" class="btn3d btn-danger" style="left:88px;top:7px;width:72px;height:40px;font-size:13px;letter-spacing:1px;">STOP</div>
+              <div id="btn-step" class="btn3d btn-ghost" style="left:168px;top:7px;width:72px;height:40px;font-size:13px;letter-spacing:1px;">STEP</div>
+              <div id="btn-reset" class="btn3d btn-ghost" style="left:248px;top:7px;width:64px;height:40px;font-size:13px;letter-spacing:1px;">RESET</div>
             </div>
           </div>
         </div>
@@ -385,20 +422,18 @@ function rpmToY(v) {
 
 function drawWave(m) {
   /* 背景 */
-  ctx.fillStyle = '#04090a'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#0a0d11'; ctx.fillRect(0, 0, W, H);
 
-  /* === 示波器网格：大格 + 每大格 5 小格 === */
+  /* === 网格：极淡中性灰，仅大格可见、小格隐约 === */
   ctx.lineWidth = 1;
-  /* 小格：垂直每 10rpm，水平每 0.2s */
-  ctx.strokeStyle = 'rgba(16,70,66,.38)';
+  ctx.strokeStyle = 'rgba(255,255,255,.03)';
   for (let g = -50; g <= 250; g += 10) { if (g % 50 === 0) continue;
     const y = Math.round(rpmToY(g)) + .5;
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
   for (let s = 0; s <= 10; s += 0.2) { if (s % 1 === 0) continue;
     const x = Math.round(s / 10 * W) + .5;
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-  /* 大格：垂直每 50rpm，水平每 1s */
-  ctx.strokeStyle = 'rgba(28,120,110,.55)';
+  ctx.strokeStyle = 'rgba(255,255,255,.07)';
   for (let g = -50; g <= 250; g += 50) {
     const y = Math.round(rpmToY(g)) + .5;
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
@@ -407,20 +442,20 @@ function drawWave(m) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
 
   const T = waveT[m], A = waveA[m], idx = waveIdx[m];
-  /* 荧光辉光波形 */
-  const line = (arr, color, glow) => {
-    ctx.strokeStyle = color; ctx.lineWidth = 1.7; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.shadowColor = glow; ctx.shadowBlur = 6;
+  /* 干净线条，无辉光：目标为中性灰蓝虚线感，实际为品牌蓝 */
+  const line = (arr, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.shadowBlur = 0;
     ctx.beginPath();
     for (let i = 0; i < WAVE_POINTS - 1; i++) {
       const i1 = (idx + i) % WAVE_POINTS, i2 = (idx + i + 1) % WAVE_POINTS;
       const x1 = i / (WAVE_POINTS - 1) * W, x2 = (i + 1) / (WAVE_POINTS - 1) * W;
       ctx.moveTo(x1, rpmToY(arr[i1])); ctx.lineTo(x2, rpmToY(arr[i2]));
     }
-    ctx.stroke(); ctx.shadowBlur = 0;
+    ctx.stroke();
   };
-  line(T, '#ffd34d', '#ffb300');   // 目标（黄，辉光）
-  line(A, '#39ff8b', '#00ff66');   // 实际（绿，辉光）
+  line(T, '#6b7684', 1.2);   // 目标：灰蓝细线
+  line(A, '#4a9eff', 1.6);   // 实际：品牌蓝
 }
 
 function fmtOvershoot(i) {
@@ -444,10 +479,8 @@ function drawRunStatus(m) {
 
 function drawTabs() {
   const m1 = $('btn-m1'), m2 = $('btn-m2');
-  if (cur === 0) { m1.style.background = '#0d6a2a'; m1.style.color = '#00ff00'; m1.style.borderColor = '#00ff00';
-                   m2.style.background = '#104141'; m2.style.color = '#9aa5ad'; m2.style.borderColor = '#9aa5ad'; }
-  else { m1.style.background = '#104141'; m1.style.color = '#9aa5ad'; m1.style.borderColor = '#9aa5ad';
-         m2.style.background = '#0d6a2a'; m2.style.color = '#00ffff'; m2.style.borderColor = '#00ffff'; }
+  m1.classList.toggle('sel', cur === 0);
+  m2.classList.toggle('sel', cur === 1);
 }
 
 function drawReadout(m) {

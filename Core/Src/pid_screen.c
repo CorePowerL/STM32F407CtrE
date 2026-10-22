@@ -1,16 +1,21 @@
 /**
  ******************************************************************************
  * @file    pid_screen.c
- * @brief   PID 调试屏幕模块 - LVGL 实现
- *          320x240, 黑底绿/黄/青/红, 布局与 PID_Tuner_UI.html 完全一致
+ * @brief   PID 调试屏幕模块 - LVGL 实现 (简约高端深色仪器风)
+ *          320x240, 显示与 PID_Tuner_UI.html 当前设计完全一致
  *
- *          功能:
- *           - M1/M2 双电机独立 PID 参数
- *           - 触摸屏 +/- 按钮调 Kp/Ki/Kd/Target
- *           - 目标/实际转速实时波形 (10秒窗口, 100点)
- *           - 超调量/稳态误差显示
+ *          设计语言:
+ *           - 分层深灰黑底, 细分隔线 (白色 6%~7%), 无粗边框
+ *           - 单一强调色蓝 #4a9eff, 红色仅用于 STOP/超调
+ *           - 参数数值统一浅色, 无荧光多彩, 无辉光
  *
- *          对外数据接口与旧版保持一致, 主程序 PID_Task 无需改动
+ *          功能 (按键与 HTML 同步):
+ *           - M1/M2 双电机独立 PID 参数, Tab 切换
+ *           - 触摸 +/- 调 Target/Kp/Ki/Kd
+ *           - 目标/实际转速实时波形 (10s 窗口, 100 点)
+ *           - RPM/PWM/OVS/ERR 读数, START/STOP/STEP/RESET
+ *
+ *          对外数据接口与旧版一致, 主程序 PID_Task 无需改动
  ******************************************************************************
  */
 
@@ -20,7 +25,6 @@
 #include "pid_screen.h"
 #include "lvgl.h"
 #include "lv_port.h"
-#include "wave_grid.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,22 +35,18 @@
 #define SCR_W           320
 #define SCR_H           240
 
-/* 颜色 (RGB565, 与 pid_screen 旧版 / HTML 一致) */
-#define COL_BLACK       lv_color_hex(0x0000)
-#define COL_PANEL       lv_color_hex(0x2104)
-#define COL_BORDER      lv_color_hex(0x12A6)
-#define COL_GREEN       lv_color_hex(0x07E0)
-#define COL_YELLOW      lv_color_hex(0xFFE0)
-#define COL_RED         lv_color_hex(0xF800)
-#define COL_CYAN        lv_color_hex(0x07FF)
-#define COL_GRAY        lv_color_hex(0x8430)
-#define COL_MAGENTA     lv_color_hex(0xF81F)
-
-/* 按钮底色 (按 HTML) */
-#define FILL_M1_ACT     lv_color_hex(0x0d2a)
-#define FILL_PLUS       lv_color_hex(0x0a2a)
-#define FILL_MINUS      lv_color_hex(0x4a12)
-#define FILL_RESET      lv_color_hex(0x2a2a)
+/* ---- 简约配色 (取自当前 HTML) ---- */
+#define COL_SCR         lv_color_hex(0x0C0F14)   /* 屏幕/面板底 */
+#define COL_TOPBAR      lv_color_hex(0x0F1318)   /* 顶栏/底栏 */
+#define COL_WAVE        lv_color_hex(0x0A0D11)   /* 波形区 */
+#define COL_BTN         lv_color_hex(0x1A2029)   /* 加减按钮 */
+#define COL_INK         lv_color_hex(0xE6EAF0)   /* 主文字/数值 */
+#define COL_MUTED       lv_color_hex(0x5A6472)   /* 标签/未选中 */
+#define COL_SUB         lv_color_hex(0x8B95A3)   /* 次级文字 */
+#define COL_ACCENT      lv_color_hex(0x4A9EFF)   /* 唯一强调蓝 */
+#define COL_ACCENT_DK   lv_color_hex(0x1A5FB4)   /* 主按钮实底 */
+#define COL_DANGER      lv_color_hex(0xC97074)   /* 克制红 */
+#define COL_TARGET      lv_color_hex(0x6B7684)   /* 目标波形灰蓝 */
 
 /* ====================== PID 参数存储 ====================== */
 typedef struct {
@@ -77,6 +77,8 @@ static uint16_t wave_idx[2] = {0, 0};
 
 /* ====================== LVGL 控件句柄 ====================== */
 static lv_obj_t *tab_m1, *tab_m2;
+static lv_obj_t *tab_m1_lbl, *tab_m2_lbl;
+static lv_obj_t *tab_m1_line, *tab_m2_line;
 static lv_obj_t *led_obj, *led_txt;
 static lv_obj_t *val[4];            /* 左栏参数值 */
 static lv_obj_t *ro[4];             /* 读数行数值 */
@@ -150,8 +152,7 @@ uint8_t PID_Screen_TouchGetPoint(uint16_t *x, uint16_t *y)
     return tp_get_point(x, y);
 }
 
-/* ====================== UI 构建 (与 html 一致) ====================== */
-
+/* ====================== UI 辅助构建 ====================== */
 static lv_obj_t *mk_label(lv_obj_t *parent, int x, int y, const char *txt,
                           lv_color_t color, const lv_font_t *font)
 {
@@ -163,46 +164,21 @@ static lv_obj_t *mk_label(lv_obj_t *parent, int x, int y, const char *txt,
     return l;
 }
 
-/* 示波器通道标签: 半透明底 + 色块 + 文字 (叠加在网格顶部) */
-static lv_obj_t *mk_ch_tag(lv_obj_t *parent, int x, lv_color_t c, const char *txt)
-{
-    lv_obj_t *bg = lv_obj_create(parent);
-    lv_obj_set_pos(bg, x, 2);
-    lv_obj_set_size(bg, 50, 12);
-    lv_obj_set_style_bg_color(bg, lv_color_hex(0x04090a), 0);
-    lv_obj_set_style_bg_opa(bg, LV_OPA_60, 0);
-    lv_obj_set_style_border_width(bg, 0, 0);
-    lv_obj_set_style_radius(bg, 3, 0);
-    lv_obj_set_style_pad_all(bg, 0, 0);
-
-    lv_obj_t *sw = lv_obj_create(bg);
-    lv_obj_set_pos(sw, 3, 2);
-    lv_obj_set_size(sw, 9, 9);
-    lv_obj_set_style_bg_color(sw, c, 0);
-    lv_obj_set_style_border_width(sw, 0, 0);
-    lv_obj_set_style_radius(sw, 1, 0);
-    lv_obj_set_style_pad_all(sw, 0, 0);
-
-    lv_obj_t *l = lv_label_create(bg);
-    lv_obj_set_pos(l, 14, 1);
-    lv_label_set_text(l, txt);
-    lv_obj_set_style_text_color(l, c, 0);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
-    return bg;
-}
-
-/* 扁平 3D 风格按钮: 深底 + 亮色描边 + 亮色文字 */
+/* 幽灵/实色按钮: 颜色由调用方通过样式给定 */
 static lv_obj_t *mk_btn(lv_obj_t *parent, int x, int y, int w, int h,
-                        const char *txt, lv_color_t bg, lv_color_t border,
-                        lv_color_t fg, const lv_font_t *font)
+                        const char *txt, lv_color_t bg, lv_opa_t bg_opa,
+                        lv_color_t border, lv_color_t fg,
+                        const lv_font_t *font, lv_coord_t radius)
 {
     lv_obj_t *b = lv_btn_create(parent);
     lv_obj_set_pos(b, x, y);
     lv_obj_set_size(b, w, h);
     lv_obj_set_style_bg_color(b, bg, 0);
+    lv_obj_set_style_bg_opa(b, bg_opa, 0);
     lv_obj_set_style_border_color(b, border, 0);
     lv_obj_set_style_border_width(b, 1, 0);
-    lv_obj_set_style_radius(b, 4, 0);
+    lv_obj_set_style_radius(b, radius, 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
     lv_obj_set_style_pad_all(b, 0, 0);
     lv_obj_set_style_text_color(b, fg, 0);
     lv_obj_set_style_text_font(b, font, 0);
@@ -215,6 +191,35 @@ static lv_obj_t *mk_btn(lv_obj_t *parent, int x, int y, int w, int h,
     return b;
 }
 
+/* 透明容器: 无圆角无描边无内边距 */
+static lv_obj_t *mk_panel(lv_obj_t *parent, int x, int y, int w, int h,
+                          lv_color_t bg)
+{
+    lv_obj_t *p = lv_obj_create(parent);
+    lv_obj_set_pos(p, x, y);
+    lv_obj_set_size(p, w, h);
+    lv_obj_set_style_bg_color(p, bg, 0);
+    lv_obj_set_style_border_width(p, 0, 0);
+    lv_obj_set_style_radius(p, 0, 0);
+    lv_obj_set_style_pad_all(p, 0, 0);
+    lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+    return p;
+}
+
+/* 1px 分隔线 */
+static void mk_sep(lv_obj_t *parent, int x, int y, int w, int h)
+{
+    lv_obj_t *s = lv_obj_create(parent);
+    lv_obj_set_pos(s, x, y);
+    lv_obj_set_size(s, w, h);
+    lv_obj_set_style_bg_color(s, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_opa(s, LV_OPA_10, 0);
+    lv_obj_set_style_border_width(s, 0, 0);
+    lv_obj_set_style_radius(s, 0, 0);
+    lv_obj_set_style_pad_all(s, 0, 0);
+    lv_obj_clear_flag(s, LV_OBJ_FLAG_CLICKABLE);
+}
+
 static void draw_param_values(void)
 {
     char s[16];
@@ -225,31 +230,23 @@ static void draw_param_values(void)
     lv_snprintf(s, sizeof(s), "%.2f", m->kd);          lv_label_set_text(val[3], s);
 }
 
+/* Tab 选中态: 文字亮度 + 底部 2px 蓝线 */
 static void draw_motor_tabs(void)
 {
-    if (cur_motor == 0) {
-        lv_obj_set_style_bg_color(tab_m1, FILL_M1_ACT, 0);
-        lv_obj_set_style_border_color(tab_m1, COL_GREEN, 0);
-        lv_obj_set_style_text_color(tab_m1, COL_GREEN, 0);
-        lv_obj_set_style_bg_color(tab_m2, COL_PANEL, 0);
-        lv_obj_set_style_border_color(tab_m2, COL_GRAY, 0);
-        lv_obj_set_style_text_color(tab_m2, COL_GRAY, 0);
-    } else {
-        lv_obj_set_style_bg_color(tab_m1, COL_PANEL, 0);
-        lv_obj_set_style_border_color(tab_m1, COL_GRAY, 0);
-        lv_obj_set_style_text_color(tab_m1, COL_GRAY, 0);
-        lv_obj_set_style_bg_color(tab_m2, FILL_M1_ACT, 0);
-        lv_obj_set_style_border_color(tab_m2, COL_CYAN, 0);
-        lv_obj_set_style_text_color(tab_m2, COL_CYAN, 0);
-    }
+    lv_obj_set_style_text_color(tab_m1_lbl, cur_motor == 0 ? COL_INK : COL_MUTED, 0);
+    lv_obj_set_style_text_color(tab_m2_lbl, cur_motor == 1 ? COL_INK : COL_MUTED, 0);
+    if (cur_motor == 0) { lv_obj_clear_flag(tab_m1_line, LV_OBJ_FLAG_HIDDEN);
+                          lv_obj_add_flag(tab_m2_line, LV_OBJ_FLAG_HIDDEN); }
+    else                { lv_obj_add_flag(tab_m1_line, LV_OBJ_FLAG_HIDDEN);
+                          lv_obj_clear_flag(tab_m2_line, LV_OBJ_FLAG_HIDDEN); }
 }
 
 static void draw_run_status(void)
 {
     uint8_t running = is_running[cur_motor];
-    lv_obj_set_style_bg_color(led_obj, running ? COL_GREEN : COL_GRAY, 0);
+    lv_obj_set_style_bg_color(led_obj, running ? COL_ACCENT : lv_color_hex(0x3A414C), 0);
     lv_label_set_text(led_txt, running ? "RUN" : "STOP");
-    lv_obj_set_style_text_color(led_txt, running ? COL_GREEN : COL_GRAY, 0);
+    lv_obj_set_style_text_color(led_txt, running ? lv_color_hex(0x8FB8EC) : COL_MUTED, 0);
 }
 
 /* 把当前电机的环形波形缓冲按时间序写入图表 */
@@ -297,7 +294,7 @@ static void switch_motor(uint8_t m)
     draw_waveform();
 }
 
-/* ====================== 触摸事件回调 ====================== */
+/* ====================== 触摸事件回调 (与 HTML 同步) ====================== */
 static void ev_dec(lv_event_t *e)
 {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
@@ -351,165 +348,168 @@ static void ev_reset(lv_event_t *e)
     draw_param_values();
 }
 
-/* ====================== UI 搭建 ====================== */
+/* ====================== UI 搭建 (与 html 一致) ====================== */
 static void build_ui(void)
 {
     const lv_font_t *f12 = &lv_font_montserrat_12;
+    const lv_font_t *f14 = &lv_font_montserrat_14;
     const lv_font_t *f16 = &lv_font_montserrat_16;
 
-    /* 主屏黑底 */
+    /* 主屏底色 */
     lv_obj_t *scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, COL_BLACK, 0);
+    lv_obj_set_style_bg_color(scr, COL_SCR, 0);
 
-    /* ===== 顶栏 ===== */
-    lv_obj_t *top = lv_obj_create(scr);
-    lv_obj_set_pos(top, 0, 0);
-    lv_obj_set_size(top, SCR_W, 24);
-    lv_obj_set_style_bg_color(top, COL_PANEL, 0);
-    lv_obj_set_style_border_width(top, 0, 0);
-    lv_obj_set_style_radius(top, 0, 0);
-    lv_obj_set_style_pad_all(top, 0, 0);
+    /* ===== 顶栏 (0,0 320x24) ===== */
+    mk_panel(scr, 0, 0, SCR_W, 24, COL_TOPBAR);
+    mk_sep(scr, 0, 23, SCR_W, 1);
 
-    mk_label(top, 4, 4, "PID Tuner", COL_CYAN, f12);
+    mk_label(scr, 10, 5, "PID TUNER", COL_MUTED, f12);
 
-    tab_m1 = mk_btn(top, 110, 3, 31, 18, "M1", FILL_M1_ACT, COL_GREEN, COL_GREEN, f12);
-    tab_m2 = mk_btn(top, 145, 3, 31, 18, "M2", COL_PANEL, COL_GRAY, COL_GRAY, f12);
+    /* Tab: 透明按钮, 内部 label + 底部线 */
+    tab_m1 = mk_panel(scr, 88, 0, 42, 24, COL_TOPBAR);
+    tab_m1_lbl = mk_label(tab_m1, 0, 5, "M1", COL_INK, f12);
+    lv_obj_set_width(tab_m1_lbl, 42);
+    lv_obj_set_style_text_align(tab_m1_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    tab_m1_line = lv_obj_create(tab_m1);
+    lv_obj_set_pos(tab_m1_line, 8, 22);
+    lv_obj_set_size(tab_m1_line, 26, 2);
+    lv_obj_set_style_bg_color(tab_m1_line, COL_ACCENT, 0);
+    lv_obj_set_style_border_width(tab_m1_line, 0, 0);
+    lv_obj_set_style_radius(tab_m1_line, 1, 0);
+    lv_obj_set_style_pad_all(tab_m1_line, 0, 0);
+    lv_obj_clear_flag(tab_m1_line, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(tab_m1, LV_OBJ_FLAG_CLICKABLE);
 
-    led_obj = lv_obj_create(top);
-    lv_obj_set_pos(led_obj, 256, 8);
-    lv_obj_set_size(led_obj, 9, 9);
+    tab_m2 = mk_panel(scr, 134, 0, 42, 24, COL_TOPBAR);
+    tab_m2_lbl = mk_label(tab_m2, 0, 5, "M2", COL_MUTED, f12);
+    lv_obj_set_width(tab_m2_lbl, 42);
+    lv_obj_set_style_text_align(tab_m2_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    tab_m2_line = lv_obj_create(tab_m2);
+    lv_obj_set_pos(tab_m2_line, 8, 22);
+    lv_obj_set_size(tab_m2_line, 26, 2);
+    lv_obj_set_style_bg_color(tab_m2_line, COL_ACCENT, 0);
+    lv_obj_set_style_border_width(tab_m2_line, 0, 0);
+    lv_obj_set_style_radius(tab_m2_line, 1, 0);
+    lv_obj_set_style_pad_all(tab_m2_line, 0, 0);
+    lv_obj_clear_flag(tab_m2_line, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(tab_m2_line, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(tab_m2, LV_OBJ_FLAG_CLICKABLE);
+
+    /* 状态点 + 状态文字 (右侧) */
+    led_obj = lv_obj_create(scr);
+    lv_obj_set_pos(led_obj, 308, 9);
+    lv_obj_set_size(led_obj, 6, 6);
     lv_obj_set_style_radius(led_obj, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(led_obj, COL_GRAY, 0);
+    lv_obj_set_style_bg_color(led_obj, lv_color_hex(0x3A414C), 0);
     lv_obj_set_style_border_width(led_obj, 0, 0);
     lv_obj_set_style_pad_all(led_obj, 0, 0);
-    led_txt = mk_label(top, 269, 4, "STOP", COL_GRAY, f12);
+    led_txt = mk_label(scr, 270, 5, "STOP", COL_MUTED, f12);
 
-    /* ===== 左栏参数面板 ===== */
-    lv_obj_t *left = lv_obj_create(scr);
-    lv_obj_set_pos(left, 0, 24);
-    lv_obj_set_size(left, 120, 162);
-    lv_obj_set_style_bg_color(left, COL_BLACK, 0);
-    lv_obj_set_style_border_color(left, COL_BORDER, 0);
-    lv_obj_set_style_border_width(left, 1, 0);
-    lv_obj_set_style_radius(left, 0, 0);
-    lv_obj_set_style_pad_all(left, 0, 0);
+    /* ===== 左栏参数面板 (0,24 90x162) ===== */
+    lv_obj_t *left = mk_panel(scr, 0, 24, 90, 162, COL_SCR);
+    mk_sep(left, 89, 0, 1, 162);
 
-    const char *labels[4] = {"Target", "Kp", "Ki", "Kd"};
-    int ly[4] = {4, 42, 80, 118};
-    int vy[4] = {24, 62, 100, 138};
-    lv_color_t vcol[4] = {COL_YELLOW, COL_GREEN, COL_CYAN, COL_MAGENTA};
+    const char *labels[4] = {"TARGET", "KP", "KI", "KD"};
+    int ly[4] = {3, 43, 83, 123};      /* 标签行 */
+    int by[4] = {17, 57, 97, 137};     /* 数值/按钮行 */
 
     for (int i = 0; i < 4; i++) {
-        mk_label(left, 6, ly[i], labels[i], COL_GRAY, f12);
-        val[i] = mk_label(left, 34, vy[i], "", vcol[i], f16);
+        mk_label(left, 10, ly[i], labels[i], COL_MUTED, f12);
 
-        lv_obj_t *dec = mk_btn(left, 4,  ly[i]+18, 23, 19, "-", FILL_MINUS, COL_RED, COL_RED, f12);
-        lv_obj_t *inc = mk_btn(left, 94, ly[i]+18, 23, 19, "+", FILL_PLUS, COL_GREEN, COL_GREEN, f12);
+        lv_obj_t *dec = mk_btn(left, 2,  by[i], 22, 16, "-",
+                               COL_BTN, LV_OPA_COVER, COL_BTN, COL_SUB, f12, 3);
+        val[i] = mk_label(left, 26, by[i] - 1, "", COL_INK, f16);
+        lv_obj_set_width(val[i], 38);
+        lv_obj_set_style_text_align(val[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_t *inc = mk_btn(left, 66, by[i], 22, 16, "+",
+                               COL_BTN, LV_OPA_COVER, COL_BTN, COL_SUB, f12, 3);
         lv_obj_add_event_cb(dec, ev_dec, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         lv_obj_add_event_cb(inc, ev_inc, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
 
-    /* ===== 波形区 (示波器风格) ===== */
-    lv_obj_t *wavebox = lv_obj_create(scr);
-    lv_obj_set_pos(wavebox, 120, 25);
-    lv_obj_set_size(wavebox, 199, 117);
-    lv_obj_set_style_bg_color(wavebox, COL_BLACK, 0);
-    lv_obj_set_style_border_color(wavebox, COL_BORDER, 0);
-    lv_obj_set_style_border_width(wavebox, 1, 0);
-    lv_obj_set_style_radius(wavebox, 0, 0);
-    lv_obj_set_style_pad_all(wavebox, 0, 0);
+    /* ===== 波形区 (90,25 229x126) ===== */
+    mk_panel(scr, 90, 25, 229, 126, COL_WAVE);
 
-    /* 示波器网格背景 (静态图, 与 HTML 一致) */
-    lv_obj_t *grid = lv_img_create(wavebox);
-    lv_img_set_src(grid, &wave_grid);
-    lv_obj_set_pos(grid, 1, 1);
-
-    chart = lv_chart_create(wavebox);
-    lv_obj_set_pos(chart, 1, 1);
-    lv_obj_set_size(chart, 195, 113);
-    lv_obj_set_style_bg_opa(chart, LV_OPA_TRANSP, 0);    /* 透明, 露出网格 */
+    chart = lv_chart_create(lv_scr_act());
+    lv_obj_set_pos(chart, 90, 25);
+    lv_obj_set_size(chart, 229, 126);
+    lv_obj_set_style_bg_opa(chart, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(chart, 0, 0);
     lv_obj_set_style_pad_all(chart, 0, 0);
     lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
     lv_chart_set_point_count(chart, WAVE_POINTS);
     lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, -50, 250);
-    lv_chart_set_div_line_count(chart, 0, 0);
+    /* 大格网格: 水平 5 条 (每 50rpm), 垂直 9 条 (每 1s) */
+    lv_chart_set_div_line_count(chart, 5, 9);
+    lv_obj_set_style_line_color(chart, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_line_opa(chart, LV_OPA_10, 0);
+    lv_obj_set_style_line_width(chart, 1, 0);
     lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 0, 0, 0, 0, false, 0);
     lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 0, 0, 0, 0, false, 0);
-    lv_obj_set_style_line_width(chart, 2, LV_PART_ITEMS);
-    lv_obj_set_style_line_rounded(chart, true, LV_PART_ITEMS);
+    /* 系列线条: 目标细灰蓝, 实际蓝 */
+    ser_target = lv_chart_add_series(chart, COL_TARGET, LV_CHART_AXIS_PRIMARY_Y);
+    ser_actual = lv_chart_add_series(chart, COL_ACCENT, LV_CHART_AXIS_PRIMARY_Y);
+    lv_obj_set_style_line_width(chart, 1, LV_PART_ITEMS);
+    lv_obj_set_style_size(chart, 0, LV_PART_ITEMS);
 
-    ser_target = lv_chart_add_series(chart, lv_color_hex(0xFFD34D), LV_CHART_AXIS_PRIMARY_Y);
-    ser_actual = lv_chart_add_series(chart, lv_color_hex(0x39FF8B), LV_CHART_AXIS_PRIMARY_Y);
+    /* 图例: 小色块 + 文字 */
+    lv_obj_t *sw1 = lv_obj_create(lv_scr_act());
+    lv_obj_set_pos(sw1, 100, 32);
+    lv_obj_set_size(sw1, 7, 7);
+    lv_obj_set_style_bg_color(sw1, COL_TARGET, 0);
+    lv_obj_set_style_border_width(sw1, 0, 0);
+    lv_obj_set_style_radius(sw1, 2, 0);
+    lv_obj_set_style_pad_all(sw1, 0, 0);
+    mk_label(lv_scr_act(), 111, 30, "Target", COL_SUB, f12);
 
-    /* 通道标签 + 时基 (叠加在网格顶部) */
-    mk_ch_tag(wavebox, 4, lv_color_hex(0xFFD34D), "Target");
-    mk_ch_tag(wavebox, 54, lv_color_hex(0x39FF8B), "Actual");
-    mk_label(wavebox, 150, 3, "1 s/div", COL_GRAY, f12);
+    lv_obj_t *sw2 = lv_obj_create(lv_scr_act());
+    lv_obj_set_pos(sw2, 160, 32);
+    lv_obj_set_size(sw2, 7, 7);
+    lv_obj_set_style_bg_color(sw2, COL_ACCENT, 0);
+    lv_obj_set_style_border_width(sw2, 0, 0);
+    lv_obj_set_style_radius(sw2, 2, 0);
+    lv_obj_set_style_pad_all(sw2, 0, 0);
+    mk_label(lv_scr_act(), 171, 30, "Actual", COL_SUB, f12);
 
-    /* ===== 读数行 ===== */
-    lv_obj_t *robox = lv_obj_create(scr);
-    lv_obj_set_pos(robox, 120, 145);
-    lv_obj_set_size(robox, 199, 40);
-    lv_obj_set_style_bg_color(robox, COL_BLACK, 0);
-    lv_obj_set_style_border_color(robox, COL_BORDER, 0);
-    lv_obj_set_style_border_width(robox, 1, 0);
-    lv_obj_set_style_radius(robox, 0, 0);
-    lv_obj_set_style_pad_all(robox, 0, 0);
+    mk_label(lv_scr_act(), 268, 31, "1 s/div", lv_color_hex(0x4A535F), f12);
 
-    const char *roh[4] = {"RPM", "PWM%", "OVS%", "ERR"};
-    int rox[4] = {0, 50, 100, 150};
-    lv_color_t rocol[4] = {COL_GREEN, COL_YELLOW, COL_RED, COL_YELLOW};
+    /* ===== 读数行 (90,152 229x34) ===== */
+    lv_obj_t *robox = mk_panel(scr, 90, 152, 229, 34, COL_SCR);
+    mk_sep(robox, 0, 0, 229, 1);
+
+    const char *roh[4] = {"RPM", "PWM", "OVS", "ERR"};
+    int rox[4] = {0, 57, 114, 171};
     for (int i = 0; i < 4; i++) {
-        /* 列标签: 宽49, 居中 */
-        lv_obj_t *rh = lv_label_create(robox);
-        lv_obj_set_pos(rh, rox[i], 3);
-        lv_obj_set_width(rh, 49);
-        lv_label_set_text(rh, roh[i]);
-        lv_obj_set_style_text_color(rh, COL_GRAY, 0);
-        lv_obj_set_style_text_font(rh, f12, 0);
+        lv_obj_t *rh = mk_label(robox, rox[i], 4, roh[i], COL_MUTED, f12);
+        lv_obj_set_width(rh, 57);
         lv_obj_set_style_text_align(rh, LV_TEXT_ALIGN_CENTER, 0);
-        /* 数值: 宽49, 居中 */
-        lv_obj_t *rv = lv_label_create(robox);
-        lv_obj_set_pos(rv, rox[i], 19);
-        lv_obj_set_width(rv, 49);
-        lv_label_set_text(rv, "");
-        lv_obj_set_style_text_color(rv, rocol[i], 0);
-        lv_obj_set_style_text_font(rv, f12, 0);
+        lv_obj_t *rv = mk_label(robox, rox[i], 18, "",
+                                i == 2 ? COL_DANGER : COL_INK, f12);
+        lv_obj_set_width(rv, 57);
         lv_obj_set_style_text_align(rv, LV_TEXT_ALIGN_CENTER, 0);
         ro[i] = rv;
     }
-    /* 水平分隔线 (标签/数值之间) */
-    lv_obj_t *hsep = lv_obj_create(robox);
-    lv_obj_set_pos(hsep, 0, 15);
-    lv_obj_set_size(hsep, 199, 1);
-    lv_obj_set_style_bg_color(hsep, COL_BORDER, 0);
-    lv_obj_set_style_border_width(hsep, 0, 0);
-    lv_obj_set_style_pad_all(hsep, 0, 0);
     /* 列分隔线 */
-    int sepX[3] = {50, 99, 149};
     for (int i = 0; i < 3; i++) {
-        lv_obj_t *sep = lv_obj_create(robox);
-        lv_obj_set_pos(sep, sepX[i], 0);
-        lv_obj_set_size(sep, 1, 40);
-        lv_obj_set_style_bg_color(sep, COL_BORDER, 0);
-        lv_obj_set_style_border_width(sep, 0, 0);
-        lv_obj_set_style_pad_all(sep, 0, 0);
+        mk_sep(robox, rox[i + 1], 0, 1, 34);
     }
 
-    /* ===== 底栏 ===== */
-    lv_obj_t *bar = lv_obj_create(scr);
-    lv_obj_set_pos(bar, 0, 186);
-    lv_obj_set_size(bar, SCR_W, 54);
-    lv_obj_set_style_bg_color(bar, COL_PANEL, 0);
-    lv_obj_set_style_border_width(bar, 0, 0);
-    lv_obj_set_style_radius(bar, 0, 0);
-    lv_obj_set_style_pad_all(bar, 0, 0);
+    /* ===== 底栏 (0,186 320x54) ===== */
+    mk_panel(scr, 0, 186, SCR_W, 54, COL_TOPBAR);
+    mk_sep(scr, 0, 186, SCR_W, 1);
 
-    lv_obj_t *b_start = mk_btn(bar, 0,  5, 80, 44, "START", FILL_PLUS,  COL_GREEN,  COL_GREEN,  f16);
-    lv_obj_t *b_stop  = mk_btn(bar, 80, 5, 80, 44, "STOP",  FILL_MINUS, COL_RED,    COL_RED,    f16);
-    lv_obj_t *b_step  = mk_btn(bar, 160,5, 80, 44, "STEP",  FILL_M1_ACT,COL_CYAN,   COL_CYAN,   f16);
-    lv_obj_t *b_reset = mk_btn(bar, 240,5, 80, 44, "RESET", FILL_RESET, COL_YELLOW, COL_YELLOW, f16);
+    lv_obj_t *b_start = mk_btn(lv_scr_act(), 8, 193, 72, 40, "START",
+                               COL_ACCENT_DK, LV_OPA_COVER, COL_ACCENT_DK,
+                               lv_color_hex(0xFFFFFF), f14, 3);
+    lv_obj_t *b_stop  = mk_btn(lv_scr_act(), 88, 193, 72, 40, "STOP",
+                               COL_TOPBAR, LV_OPA_TRANSP, COL_DANGER,
+                               COL_DANGER, f14, 3);
+    lv_obj_t *b_step  = mk_btn(lv_scr_act(), 168, 193, 72, 40, "STEP",
+                               COL_TOPBAR, LV_OPA_TRANSP, COL_SUB,
+                               COL_SUB, f14, 3);
+    lv_obj_t *b_reset = mk_btn(lv_scr_act(), 248, 193, 64, 40, "RESET",
+                               COL_TOPBAR, LV_OPA_TRANSP, COL_SUB,
+                               COL_SUB, f14, 3);
     lv_obj_add_event_cb(b_start, ev_start, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(b_stop,  ev_stop,  LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(b_step,  ev_step,  LV_EVENT_CLICKED, NULL);
