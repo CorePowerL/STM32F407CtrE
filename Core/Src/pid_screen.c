@@ -395,8 +395,8 @@ static void build_ui(void)
     lv_obj_set_style_pad_all(left, 0, 0);
 
     const char *labels[4] = {"Target", "Kp", "Ki", "Kd"};
-    int ly[4] = {26, 64, 102, 140};
-    int vy[4] = {48, 86, 124, 162};
+    int ly[4] = {4, 42, 80, 118};
+    int vy[4] = {24, 62, 100, 138};
     lv_color_t vcol[4] = {COL_YELLOW, COL_GREEN, COL_CYAN, COL_MAGENTA};
 
     for (int i = 0; i < 4; i++) {
